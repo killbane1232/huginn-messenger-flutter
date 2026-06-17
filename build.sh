@@ -4,9 +4,10 @@ set -e
 export PATH="/usr/local/go/bin:/usr/local/flutter/bin:$PATH"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+GO_SRC="$ROOT/src/huginn-messenger"
 
 echo "=== 1. Building Go shared library (host) ==="
-cd "$ROOT/src"
+cd "$GO_SRC"
 go build -buildmode=c-shared -o libhuginn_messenger.so .
 echo "   -> src/libhuginn_messenger.so"
 
@@ -29,7 +30,7 @@ build_android_abi() {
 
   echo "  Building for $ABI (GOARCH=$GOARCH)..."
   (
-    cd "$ROOT/src"
+    cd "$GO_SRC"
     export GOOS=android
     export GOARCH="$GOARCH"
     export CGO_ENABLED=1
@@ -38,7 +39,7 @@ build_android_abi() {
     if [ -n "$GOARM" ]; then
       export GOARM="$GOARM"
     fi
-    OUTDIR="$ROOT/src/android/$ABI"
+    OUTDIR="$GO_SRC/android/$ABI"
     mkdir -p "$OUTDIR"
     go build -buildmode=c-shared -o "$OUTDIR/libhuginn_messenger.so" .
     echo "     -> android/$ABI/libhuginn_messenger.so"
@@ -51,11 +52,11 @@ build_android_abi amd64      x86_64     x86_64-linux-android
 build_android_abi 386        x86        i686-linux-android
 
 echo ""
-echo "  Copying to jniLibs..."
+  echo "  Copying to jniLibs..."
 JNIDIR="$ROOT/android/app/src/main/jniLibs"
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   mkdir -p "$JNIDIR/$abi"
-  cp "$ROOT/src/android/$abi/libhuginn_messenger.so" "$JNIDIR/$abi/"
+  cp "$GO_SRC/android/$abi/libhuginn_messenger.so" "$JNIDIR/$abi/"
   echo "     -> jniLibs/$abi/libhuginn_messenger.so"
 done
 

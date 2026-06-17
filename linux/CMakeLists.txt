@@ -76,7 +76,7 @@ include(flutter/generated_plugins.cmake)
 
 # Build Go shared library and bundle it (must come after generated_plugins.cmake
 # because it sets PLUGIN_BUNDLED_LIBRARIES to empty).
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src" "${CMAKE_CURRENT_BINARY_DIR}/go")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src/huginn-messenger" "${CMAKE_CURRENT_BINARY_DIR}/go")
 list(APPEND PLUGIN_BUNDLED_LIBRARIES $<TARGET_FILE:huginn_messenger_go>)
 
 

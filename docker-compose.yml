@@ -1,0 +1,12 @@
+services:
+  coturn:
+    image: instrumentisto/coturn:latest
+    network_mode: host
+    environment:
+      - TURN_LISTEN_PORT=3478
+      - TURN_REALM=huginn.local
+      - TURN_USER=huginn:changeme
+      - TURN_MIN_PORT=49160
+      - TURN_MAX_PORT=49200
+      - TURN_VERBOSE=true
+    restart: unless-stopped

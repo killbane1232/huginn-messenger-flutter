@@ -1,0 +1,15 @@
+# Run with `dart run ffigen --config ffigen.yaml`.
+name: HuginnMessengerBindings
+description: |
+  Bindings for `src/huginn_messenger.h`.
+
+  Regenerate bindings with `dart run ffigen --config ffigen.yaml`.
+output: 'lib/huginn_messenger_bindings_generated.dart'
+headers:
+  entry-points:
+    - 'src/huginn_messenger.h'
+  include-directives:
+    - 'src/huginn_messenger.h'
+comments:
+  style: any
+  length: full

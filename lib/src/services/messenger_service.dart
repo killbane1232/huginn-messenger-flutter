@@ -1,0 +1,177 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:uuid/uuid.dart';
+import 'package:path_provider/path_provider.dart';
+import '../models/peer.dart';
+import '../models/chat_message.dart';
+import '../models/config.dart';
+import '../models/app_event.dart';
+import '../ffi/messenger_bridge.dart' as bridge;
+
+const _uuid = Uuid();
+
+class MessengerService {
+  int _handle = 0;
+  String? _currentUserId;
+  Timer? _pollTimer;
+  final _eventCtrl = StreamController<AppEvent>.broadcast();
+  final _peersCtrl = StreamController<List<Peer>>.broadcast();
+  AppConfig _config = AppConfig();
+  List<Peer> _lastPeers = [];
+
+  bool get isReady => _handle > 0;
+  String? get currentUserId => _currentUserId;
+  Stream<AppEvent> get events => _eventCtrl.stream;
+  Stream<List<Peer>> get peersStream => _peersCtrl.stream;
+  AppConfig get config => _config;
+  List<Peer> get peers => _lastPeers;
+
+  Future<bool> init({
+    String? username,
+    String muninnAddr = 'http://localhost:8080',
+    String? dbPath,
+    String chunkTtl = '1w',
+    String turnAddr = '',
+    String turnUser = '',
+    String turnPass = '',
+  }) async {
+    if (isReady) return true;
+    username ??= _uuid.v4();
+    dbPath ??= await _defaultDbPath();
+    _handle = bridge.messengerCreate(username, muninnAddr, dbPath, chunkTtl,
+        turnAddr: turnAddr, turnUser: turnUser, turnPass: turnPass);
+    if (_handle <= 0) return false;
+    _loadMe();
+    _loadConfig();
+    if (_config.username == username) {
+      saveConfig(_config);
+    }
+    _loadPeers();
+    _startPolling();
+    return true;
+  }
+
+  Future<String> _defaultDbPath() async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      final dir = await getApplicationDocumentsDirectory();
+      return '${dir.path}/huginn.db';
+    }
+    return 'huginn.db';
+  }
+
+  void dispose() {
+    _pollTimer?.cancel();
+    if (_handle > 0) {
+      bridge.messengerDestroy(_handle);
+      _handle = 0;
+    }
+    _eventCtrl.close();
+    _peersCtrl.close();
+  }
+
+  void _startPolling() {
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _poll());
+  }
+
+  void _poll() {
+    if (_handle <= 0) return;
+    final json = bridge.messengerGetEvent(_handle, 100);
+    if (json.isEmpty) return;
+    try {
+      final data = jsonDecode(json) as Map<String, dynamic>;
+      final type = data['type'] as String?;
+      final raw = data['data'];
+      if (type == 'peers' && raw != null) {
+        final list = (raw as List).map((e) => Peer.fromJson(e as Map<String, dynamic>)).toList();
+        _lastPeers = list;
+        _peersCtrl.add(list);
+        _eventCtrl.add(PeersEvent(list));
+      } else if (type == 'message' && raw != null) {
+        final msg = ChatMessage.fromJson(raw as Map<String, dynamic>);
+        _eventCtrl.add(MessageEvent(msg));
+      }
+    } catch (_) {}
+  }
+
+  void _loadMe() {
+    if (_handle <= 0) return;
+    final json = bridge.messengerGetMe(_handle);
+    if (json.isNotEmpty) {
+      try {
+        final data = jsonDecode(json) as Map<String, dynamic>;
+        _currentUserId = data['id'] as String?;
+      } catch (_) {}
+    }
+  }
+
+  void _loadConfig() {
+    if (_handle <= 0) return;
+    final json = bridge.messengerGetConfig(_handle);
+    if (json.isNotEmpty) {
+      try {
+        _config = AppConfig.fromJson(jsonDecode(json) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+  }
+
+  void _loadPeers() {
+    if (_handle <= 0) return;
+    final json = bridge.messengerGetPeers(_handle);
+    if (json.isNotEmpty) {
+      try {
+        _lastPeers = (jsonDecode(json) as List).map((e) => Peer.fromJson(e as Map<String, dynamic>)).toList();
+        _peersCtrl.add(_lastPeers);
+      } catch (_) {}
+    }
+  }
+
+  List<Peer> searchPeers(String query) {
+    if (_handle <= 0) return [];
+    final json = bridge.messengerSearchPeers(_handle, query);
+    if (json.isEmpty) return [];
+    try {
+      return (jsonDecode(json) as List).map((e) => Peer.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<ChatMessage>> getMessages(String peerId) async {
+    if (_handle <= 0) return [];
+    final json = bridge.messengerGetMessages(_handle, peerId);
+    if (json.isEmpty) return [];
+    try {
+      return (jsonDecode(json) as List).map((e) => ChatMessage.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  bool sendMessage(String to, String text, {int ttl = 0}) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerSendMessage(_handle, to, text, ttl);
+    return !r.contains('"error"');
+  }
+
+  bool sendFile(String to, String text, String filePath, {int ttl = 0}) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerSendFile(_handle, to, text, filePath, ttl);
+    return !r.contains('"error"');
+  }
+
+  bool isOnline(String peerId) {
+    if (_handle <= 0) return false;
+    return bridge.messengerIsPeerOnline(_handle, peerId);
+  }
+
+  bool saveConfig(AppConfig newConfig) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerSaveConfig(_handle, jsonEncode(newConfig.toJson()));
+    if (r.contains('"ok"')) {
+      _config = newConfig;
+      return true;
+    }
+    return false;
+  }
+}

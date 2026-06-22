@@ -7,6 +7,7 @@ import '../models/peer.dart';
 import '../models/chat_message.dart';
 import '../models/config.dart';
 import '../models/app_event.dart';
+import '../models/group_chat.dart';
 import '../ffi/messenger_bridge.dart' as bridge;
 
 const _uuid = Uuid();
@@ -26,6 +27,52 @@ class MessengerService {
   Stream<List<Peer>> get peersStream => _peersCtrl.stream;
   AppConfig get config => _config;
   List<Peer> get peers => _lastPeers;
+
+  Future<GroupChat?> createGroup(String name) async {
+    if (_handle <= 0) return null;
+    final r = bridge.messengerCreateGroup(_handle, name);
+    try {
+      final data = jsonDecode(r) as Map<String, dynamic>;
+      if (data.containsKey('error')) return null;
+      return GroupChat.fromJson(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<GroupChat> getGroups() {
+    if (_handle <= 0) return [];
+    final r = bridge.messengerGetGroups(_handle);
+    try {
+      return (jsonDecode(r) as List).map((e) => GroupChat.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  bool inviteToGroup(String groupUid, String userId) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerInviteToGroup(_handle, groupUid, userId);
+    return r.contains('"ok"');
+  }
+
+  String? generateReloginSignature() {
+    if (_handle <= 0) return null;
+    final r = bridge.messengerGenerateReloginSignature(_handle);
+    try {
+      final data = jsonDecode(r) as Map<String, dynamic>;
+      if (data.containsKey('error')) return null;
+      return data['signature'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool applyReloginSignature(String signature) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerApplyReloginSignature(_handle, signature);
+    return r.contains('"ok"');
+  }
 
   Future<bool> init({
     String? username,
@@ -125,6 +172,8 @@ class MessengerService {
       } catch (_) {}
     }
   }
+
+  void refreshPeers() => _loadPeers();
 
   List<Peer> searchPeers(String query) {
     if (_handle <= 0) return [];

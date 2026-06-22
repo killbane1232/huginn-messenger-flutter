@@ -20,6 +20,12 @@ final DynamicLibrary _lib = _load();
 typedef _CreateNative = Int64 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 typedef _CreateDart = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 
+typedef _TwoStrNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>);
+typedef _TwoStrDart = Pointer<Utf8> Function(int, Pointer<Utf8>);
+
+typedef _ThreeStrNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>, Pointer<Utf8>);
+typedef _ThreeStrDart = Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>);
+
 typedef _DestroyNative = Void Function(Int64);
 typedef _DestroyDart = void Function(int);
 
@@ -60,6 +66,11 @@ final _saveConfig = _lib.lookupFunction<_ConfigSaveNative, _ConfigSaveDart>('mes
 final _getEvent = _lib.lookupFunction<_EventNative, _EventDart>('messenger_get_event');
 final _isOnline = _lib.lookupFunction<_OnlineNative, _OnlineDart>('messenger_is_peer_online');
 final _freeStr = _lib.lookupFunction<_FreeStrNative, _FreeStrDart>('messenger_free_string');
+final _createGroup = _lib.lookupFunction<_TwoStrNative, _TwoStrDart>('messenger_create_group');
+final _getGroups = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_get_groups');
+final _inviteToGroup = _lib.lookupFunction<_ThreeStrNative, _ThreeStrDart>('messenger_invite_to_group');
+final _genRelogin = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_generate_relogin_signature');
+final _applyRelogin = _lib.lookupFunction<_ConfigSaveNative, _ConfigSaveDart>('messenger_apply_relogin_signature');
 
 String _readAndFree(Pointer<Utf8> ptr) {
   final s = ptr.toDartString();
@@ -142,5 +153,32 @@ bool messengerIsPeerOnline(int handle, String peerId) {
   final p = peerId.toNativeUtf8();
   final r = _isOnline(handle, p) != 0;
   calloc.free(p);
+  return r;
+}
+
+String messengerCreateGroup(int handle, String name) {
+  final n = name.toNativeUtf8();
+  final r = _readAndFree(_createGroup(handle, n));
+  calloc.free(n);
+  return r;
+}
+
+String messengerGetGroups(int handle) => _readAndFree(_getGroups(handle));
+
+String messengerInviteToGroup(int handle, String groupUid, String userId) {
+  final g = groupUid.toNativeUtf8();
+  final u = userId.toNativeUtf8();
+  final r = _readAndFree(_inviteToGroup(handle, g, u));
+  calloc.free(g);
+  calloc.free(u);
+  return r;
+}
+
+String messengerGenerateReloginSignature(int handle) => _readAndFree(_genRelogin(handle));
+
+String messengerApplyReloginSignature(int handle, String signature) {
+  final s = signature.toNativeUtf8();
+  final r = _readAndFree(_applyRelogin(handle, s));
+  calloc.free(s);
   return r;
 }

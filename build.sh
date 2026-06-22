@@ -1,14 +1,17 @@
 #!/bin/bash
 set -e
 
+#export PATH="/opt/go1.25/bin:/usr/local/flutter/bin:$PATH"
 export PATH="/usr/local/go/bin:/usr/local/flutter/bin:$PATH"
+
+echo "Using: $(go version)"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GO_SRC="$ROOT/src/huginn-messenger"
 
 echo "=== 1. Building Go shared library (host) ==="
 cd "$GO_SRC"
-go build -buildmode=c-shared -o libhuginn_messenger.so .
+go build -ldflags='-checklinkname=0' -buildmode=c-shared -o libhuginn_messenger.so .
 echo "   -> src/libhuginn_messenger.so"
 
 echo ""
@@ -41,7 +44,7 @@ build_android_abi() {
     fi
     OUTDIR="$GO_SRC/android/$ABI"
     mkdir -p "$OUTDIR"
-    go build -buildmode=c-shared -o "$OUTDIR/libhuginn_messenger.so" .
+    go build -ldflags='-checklinkname=0' -buildmode=c-shared -o "$OUTDIR/libhuginn_messenger.so" .
     echo "     -> android/$ABI/libhuginn_messenger.so"
   )
 }

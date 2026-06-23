@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'huginn_messenger.dart';
+import 'src/services/platform_service.dart';
+import 'src/services/notification_service.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -17,6 +21,8 @@ class _HuginnAppState extends State<HuginnApp> {
   final _service = MessengerService();
   bool _loading = true;
   String? _error;
+  StreamSubscription<AppEvent>? _eventSub;
+  DateTime lastShown = DateTime.now();
 
   @override
   void initState() {
@@ -26,12 +32,38 @@ class _HuginnAppState extends State<HuginnApp> {
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     _service.dispose();
+    PlatformService.dispose();
     super.dispose();
+  }
+
+  void _onAppEvent(AppEvent event) {
+    if (event is MessageEvent) {
+      final msg = event.message;
+      if (msg.from == _service.currentUserId) return;
+      final peer = _service.peers.where((p) => p.id == msg.from).firstOrNull;
+      final peerName = peer?.username ?? msg.from;
+      final text = msg.text.isNotEmpty ? msg.text : (msg.files.isNotEmpty ? '[File]' : '');
+      if (text.isEmpty) return;
+      if (msg.timestamp.isAfter(lastShown)) {
+        NotificationService.showMessageNotification(
+          peerId: msg.from,
+          peerName: peerName,
+          text: text,
+        );
+        lastShown = msg.timestamp;
+      }
+    }
   }
 
   Future<void> _init() async {
     final ok = await _service.init();
+    if (ok) {
+      await PlatformService.init(_service);
+      await NotificationService.init();
+      _eventSub = _service.events.listen(_onAppEvent);
+    }
     if (mounted) {
       setState(() {
         _loading = false;
@@ -510,7 +542,7 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _load();
     widget.service.events.listen((e) {
-      if (e.type == 'message') _load();
+      if (e.type == 'message' || e.type == 'file_ready') _load();
     });
   }
 
@@ -524,6 +556,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _load() {
     widget.service.getMessages(widget.peerId).then((msgs) {
       if (mounted) {
+        msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         setState(() {
           _msgs = msgs;
           _loading = false;
@@ -612,6 +645,34 @@ class _ChatScreenState extends State<ChatScreen> {
     final h = dt.hour.toString().padLeft(2, '0');
     final m = dt.minute.toString().padLeft(2, '0');
     return '$h:$m';
+  }
+
+  bool _isImageFile(String filename) {
+    final ext = filename.split('.').last.toLowerCase();
+    return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].contains(ext);
+  }
+
+  Widget _buildFileRow(FileMeta f, bool own, ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.attach_file, size: 14, color: own ? colorScheme.onPrimary : colorScheme.onSurface),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              f.filename.isNotEmpty ? f.filename : '[file]',
+              style: TextStyle(
+                fontSize: 13,
+                color: own ? colorScheme.onPrimary : colorScheme.onSurface,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -722,31 +783,33 @@ class _ChatScreenState extends State<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (m.files.isNotEmpty)
-                        ...m.files.map((f) => Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.attach_file, size: 14, color: own ? colorScheme.onPrimary : colorScheme.onSurface),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  f.filename.isNotEmpty ? f.filename : '[file]',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: own ? colorScheme.onPrimary : colorScheme.onSurface,
-                                    decoration: TextDecoration.underline,
-                                  ),
+                        ...m.files.map((f) {
+                          final isImage = _isImageFile(f.filename);
+                          final filePath = widget.service.filePaths[f.fileId];
+                          if (isImage && filePath != null) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(filePath),
+                                  width: MediaQuery.of(context).size.width * 0.6,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, _, _) => _buildFileRow(f, own, colorScheme),
                                 ),
                               ),
-                            ],
-                          ),
-                        )),
+                            );
+                          }
+                          return _buildFileRow(f, own, colorScheme);
+                        }),
                       if (m.text.isNotEmpty)
-                        Text(
-                          m.text,
-                          style: TextStyle(
-                            color: own ? colorScheme.onPrimary : colorScheme.onSurface,
+                        Padding(
+                          padding: EdgeInsets.only(top: m.files.isNotEmpty ? 4 : 0),
+                          child: Text(
+                            m.text,
+                            style: TextStyle(
+                              color: own ? colorScheme.onPrimary : colorScheme.onSurface,
+                            ),
                           ),
                         ),
                       const SizedBox(height: 4),
@@ -936,8 +999,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _save() {
+    final username = _uCtrl.text.trim();
+    final oldUsername = widget.service.config.username;
+    if (username != oldUsername) {
+      widget.service.setUsername(username).then((ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
+        }
+      });
+      return;
+    }
     final ok = widget.service.saveConfig(AppConfig(
-      username: _uCtrl.text.trim(),
+      username: username,
       muninnAddr: _mCtrl.text.trim(),
       chunkTtl: _ttl,
       turnAddr: _turnAddrCtrl.text.trim(),

@@ -15,3 +15,16 @@ class MessageEvent extends AppEvent {
   final ChatMessage message;
   MessageEvent(this.message) : super('message');
 }
+
+class FileReadyEvent extends AppEvent {
+  final String fileId;
+  final String filePath;
+  final String filename;
+  final String senderId;
+  FileReadyEvent({
+    required this.fileId,
+    required this.filePath,
+    required this.filename,
+    required this.senderId,
+  }) : super('file_ready');
+}

@@ -24,3 +24,14 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# AppIndicator (ayatana) for system tray
+target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/include")
+if(EXISTS "/usr/lib/x86_64-linux-gnu/libayatana-appindicator3.so.1")
+  target_link_libraries(${BINARY_NAME} PRIVATE
+    "/usr/lib/x86_64-linux-gnu/libayatana-appindicator3.so.1")
+  target_compile_definitions(${BINARY_NAME} PRIVATE HAS_APPINDICATOR)
+  message(STATUS "Found AppIndicator: libayatana-appindicator3.so.1")
+else()
+  message(WARNING "AppIndicator not found")
+endif()

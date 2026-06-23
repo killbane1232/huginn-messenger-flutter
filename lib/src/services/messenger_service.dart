@@ -15,11 +15,13 @@ const _uuid = Uuid();
 class MessengerService {
   int _handle = 0;
   String? _currentUserId;
+  String? _dbPath;
   Timer? _pollTimer;
   final _eventCtrl = StreamController<AppEvent>.broadcast();
   final _peersCtrl = StreamController<List<Peer>>.broadcast();
   AppConfig _config = AppConfig();
   List<Peer> _lastPeers = [];
+  final Map<String, String> _filePaths = {};
 
   bool get isReady => _handle > 0;
   String? get currentUserId => _currentUserId;
@@ -27,6 +29,7 @@ class MessengerService {
   Stream<List<Peer>> get peersStream => _peersCtrl.stream;
   AppConfig get config => _config;
   List<Peer> get peers => _lastPeers;
+  Map<String, String> get filePaths => _filePaths;
 
   Future<GroupChat?> createGroup(String name) async {
     if (_handle <= 0) return null;
@@ -76,7 +79,7 @@ class MessengerService {
 
   Future<bool> init({
     String? username,
-    String muninnAddr = 'http://localhost:8080',
+    String muninnAddr = 'https://muninn.evil-bread.ru',
     String? dbPath,
     String chunkTtl = '1w',
     String turnAddr = '',
@@ -86,6 +89,7 @@ class MessengerService {
     if (isReady) return true;
     username ??= _uuid.v4();
     dbPath ??= await _defaultDbPath();
+    _dbPath = dbPath;
     _handle = bridge.messengerCreate(username, muninnAddr, dbPath, chunkTtl,
         turnAddr: turnAddr, turnUser: turnUser, turnPass: turnPass);
     if (_handle <= 0) return false;
@@ -137,6 +141,21 @@ class MessengerService {
       } else if (type == 'message' && raw != null) {
         final msg = ChatMessage.fromJson(raw as Map<String, dynamic>);
         _eventCtrl.add(MessageEvent(msg));
+      } else if (type == 'file_ready' && raw != null) {
+        final m = raw as Map<String, dynamic>;
+        final fileId = m['file_id'] as String? ?? '';
+        final filePath = m['file_path'] as String? ?? '';
+        final filename = m['filename'] as String? ?? '';
+        final senderId = m['sender_id'] as String? ?? '';
+        if (fileId.isNotEmpty && filePath.isNotEmpty) {
+          _filePaths[fileId] = filePath;
+          _eventCtrl.add(FileReadyEvent(
+            fileId: fileId,
+            filePath: filePath,
+            filename: filename,
+            senderId: senderId,
+          ));
+        }
       }
     } catch (_) {}
   }
@@ -214,6 +233,12 @@ class MessengerService {
     return bridge.messengerIsPeerOnline(_handle, peerId);
   }
 
+  bool setDownloadsDir(String path) {
+    if (_handle <= 0) return false;
+    final r = bridge.messengerSetDownloadsDir(_handle, path);
+    return r.contains('"ok"');
+  }
+
   bool saveConfig(AppConfig newConfig) {
     if (_handle <= 0) return false;
     final r = bridge.messengerSaveConfig(_handle, jsonEncode(newConfig.toJson()));
@@ -222,5 +247,36 @@ class MessengerService {
       return true;
     }
     return false;
+  }
+
+  Future<bool> setUsername(String username) async {
+    if (_handle <= 0 || _dbPath == null) return false;
+    final newConfig = AppConfig(
+      username: username,
+      muninnAddr: _config.muninnAddr,
+      chunkTtl: _config.chunkTtl,
+      dbPath: _config.dbPath,
+      turnAddr: _config.turnAddr,
+      turnUser: _config.turnUser,
+      turnPass: _config.turnPass,
+    );
+    if (!saveConfig(newConfig)) return false;
+    _pollTimer?.cancel();
+    bridge.messengerDestroy(_handle);
+    _handle = bridge.messengerCreate(
+      username, _config.muninnAddr, _dbPath!, _config.chunkTtl,
+      turnAddr: _config.turnAddr,
+      turnUser: _config.turnUser,
+      turnPass: _config.turnPass,
+    );
+    if (_handle <= 0) return false;
+    _currentUserId = null;
+    _lastPeers = [];
+    _filePaths.clear();
+    _loadMe();
+    _loadConfig();
+    _loadPeers();
+    _startPolling();
+    return true;
   }
 }

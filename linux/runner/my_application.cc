@@ -7,12 +7,79 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+#ifdef HAS_APPINDICATOR
+#include <libayatana-appindicator/app-indicator.h>
+#endif
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static void show_window_action_cb(GSimpleAction* action, GVariant* parameter,
+                                  gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (self->window != nullptr) {
+    gtk_widget_show(GTK_WIDGET(self->window));
+    gtk_window_present(self->window);
+  }
+}
+
+static void quit_action_cb(GSimpleAction* action, GVariant* parameter,
+                           gpointer user_data) {
+  g_application_quit(G_APPLICATION(user_data));
+}
+
+static GActionEntry app_actions[] = {
+    {"show-window", show_window_action_cb, nullptr, nullptr, nullptr},
+    {"quit", quit_action_cb, nullptr, nullptr, nullptr},
+};
+
+static gboolean window_delete_event_cb(GtkWidget* widget, GdkEvent* event,
+                                       gpointer user_data) {
+  gtk_widget_hide(widget);
+  return TRUE;
+}
+
+static void tray_show_cb(GtkMenuItem* item, gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (self->window != nullptr) {
+    gtk_widget_show(GTK_WIDGET(self->window));
+    gtk_window_present(self->window);
+  }
+}
+
+static void tray_quit_cb(GtkMenuItem* item, gpointer user_data) {
+  g_application_quit(G_APPLICATION(user_data));
+}
+
+static void rebuild_tray_menu(MyApplication* self, GApplication* application) {
+#ifdef HAS_APPINDICATOR
+  GtkWidget* menu = gtk_menu_new();
+
+  GtkWidget* show_item = gtk_menu_item_new_with_label("Show");
+  g_signal_connect(show_item, "activate", G_CALLBACK(tray_show_cb), self);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), show_item);
+
+  GtkWidget* quit_item = gtk_menu_item_new_with_label("Quit");
+  g_signal_connect(quit_item, "activate", G_CALLBACK(tray_quit_cb), application);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), quit_item);
+
+  gtk_widget_show_all(menu);
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  AppIndicator* indicator = app_indicator_new(
+      "huginn-messenger", "indicator-messages",
+      APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+#pragma GCC diagnostic pop
+  app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ACTIVE);
+  app_indicator_set_menu(indicator, GTK_MENU(menu));
+#endif
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -22,8 +89,18 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  if (self->window != nullptr) {
+    gtk_window_present(self->window);
+    return;
+  }
+
   GtkWindow* window =
-      GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+      GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
+
+  g_signal_connect(window, "delete-event", G_CALLBACK(window_delete_event_cb),
+                   nullptr);
+  gtk_application_add_window(GTK_APPLICATION(application), window);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -76,6 +153,10 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
+
+  self->window = window;
+
+  rebuild_tray_menu(self, application);
 }
 
 // Implements GApplication::local_command_line.
@@ -101,19 +182,16 @@ static gboolean my_application_local_command_line(GApplication* application,
 
 // Implements GApplication::startup.
 static void my_application_startup(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application startup.
-
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
+
+  g_action_map_add_action_entries(G_ACTION_MAP(application), app_actions,
+                                  G_N_ELEMENTS(app_actions), application);
+
+  g_application_hold(application);
 }
 
 // Implements GApplication::shutdown.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
-
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }
 
@@ -133,7 +211,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->window = nullptr;
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems

@@ -71,6 +71,7 @@ final _getGroups = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_get_
 final _inviteToGroup = _lib.lookupFunction<_ThreeStrNative, _ThreeStrDart>('messenger_invite_to_group');
 final _genRelogin = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_generate_relogin_signature');
 final _applyRelogin = _lib.lookupFunction<_ConfigSaveNative, _ConfigSaveDart>('messenger_apply_relogin_signature');
+final _setDownloadsDir = _lib.lookupFunction<_ConfigSaveNative, _ConfigSaveDart>('messenger_set_downloads_dir');
 
 String _readAndFree(Pointer<Utf8> ptr) {
   final s = ptr.toDartString();
@@ -180,5 +181,12 @@ String messengerApplyReloginSignature(int handle, String signature) {
   final s = signature.toNativeUtf8();
   final r = _readAndFree(_applyRelogin(handle, s));
   calloc.free(s);
+  return r;
+}
+
+String messengerSetDownloadsDir(int handle, String dir) {
+  final d = dir.toNativeUtf8();
+  final r = _readAndFree(_setDownloadsDir(handle, d));
+  calloc.free(d);
   return r;
 }

@@ -113,18 +113,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: huginn-messenger-apk
-          path: huginn-messenger-*.apk
+          path: huginn-messenger-${{ steps.version.outputs.value }}.apk
 
       - name: Upload Linux tarball
         uses: actions/upload-artifact@v4
         with:
           name: huginn-messenger-linux
-          path: huginn-messenger-*-linux-x64.tar.gz
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            huginn-messenger-*.apk
-            huginn-messenger-*-linux-x64.tar.gz
+          path: huginn-messenger-${{ steps.version.outputs.value }}-linux-x64.tar.gz

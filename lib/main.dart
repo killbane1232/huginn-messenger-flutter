@@ -556,7 +556,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void _load() {
     widget.service.getMessages(widget.peerId).then((msgs) {
       if (mounted) {
-        msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
         setState(() {
           _msgs = msgs;
           _loading = false;
@@ -594,8 +593,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     var sent = 0;
     for (var i = 0; i < _attachedFiles.length; i++) {
-      final text = i == 0 ? t : '';
-      final ok = widget.service.sendFile(widget.peerId, text, _attachedFiles[i].path);
+      final ok = widget.service.sendFile(widget.peerId, t, _attachedFiles[i].path);
       if (ok) sent++;
     }
 

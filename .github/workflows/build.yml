@@ -1,0 +1,125 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.x'
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Go cache
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('src/huginn-messenger/go.sum') }}
+
+      - name: Flutter cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-flutter-${{ hashFiles('pubspec.lock') }}
+
+      - name: Set version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Go shared library (Linux host)
+        run: |
+          cd src/huginn-messenger
+          go build -ldflags='-checklinkname=0' -buildmode=c-shared -o libhuginn_messenger.so .
+
+      - name: Build Go shared library (Android)
+        run: |
+          export ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          API_LEVEL=24
+          cd src/huginn-messenger
+
+          for abi in arm64 arm amd64 386; do
+            case "$abi" in
+              arm64) GOARCH=arm64; ABI_DIR=arm64-v8a; CC_TRIPLE=aarch64-linux-android ;;
+              arm)   GOARCH=arm;   ABI_DIR=armeabi-v7a; CC_TRIPLE=armv7a-linux-androideabi; GOARM=7 ;;
+              amd64) GOARCH=amd64; ABI_DIR=x86_64;     CC_TRIPLE=x86_64-linux-android ;;
+              386)   GOARCH=386;   ABI_DIR=x86;        CC_TRIPLE=i686-linux-android ;;
+            esac
+            echo "Building $ABI_DIR..."
+            GOOS=android GOARCH=$GOARCH CGO_ENABLED=1 \
+              CC="$NDK_BIN/${CC_TRIPLE}${API_LEVEL}-clang" \
+              GOARM=$GOARM \
+              go build -ldflags='-checklinkname=0' -buildmode=c-shared \
+                -o "android/$ABI_DIR/libhuginn_messenger.so" .
+          done
+
+      - name: Copy Android libs to jniLibs
+        run: |
+          JNIDIR="android/app/src/main/jniLibs"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            mkdir -p "$JNIDIR/$abi"
+            cp "src/huginn-messenger/android/$abi/libhuginn_messenger.so" "$JNIDIR/$abi/"
+          done
+
+      - name: Build Flutter APK
+        run: flutter build apk --release
+
+      - name: Build Flutter Linux app
+        run: flutter build linux --release
+
+      - name: Package Linux bundle
+        run: |
+          VERSION=${{ steps.version.outputs.value }}
+          cd build/linux/x64/release
+          tar czf "$OLDPWD/huginn-messenger-${VERSION}-linux-x64.tar.gz" bundle/
+
+      - name: Rename APK
+        run: |
+          VERSION=${{ steps.version.outputs.value }}
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             "huginn-messenger-${VERSION}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: huginn-messenger-apk
+          path: huginn-messenger-*.apk
+
+      - name: Upload Linux tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: huginn-messenger-linux
+          path: huginn-messenger-*-linux-x64.tar.gz
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            huginn-messenger-*.apk
+            huginn-messenger-*-linux-x64.tar.gz

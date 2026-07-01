@@ -97,12 +97,6 @@ jobs:
       - name: Build Flutter Linux app
         run: flutter build linux --release
 
-      - name: Package Linux bundle
-        run: |
-          VERSION=${{ steps.version.outputs.value }}
-          cd build/linux/x64/release
-          tar czf "$OLDPWD/huginn-messenger-${VERSION}-linux-x64.tar.gz" bundle/
-
       - name: Rename APK
         run: |
           VERSION=${{ steps.version.outputs.value }}
@@ -119,4 +113,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: huginn-messenger-linux
-          path: huginn-messenger-${{ steps.version.outputs.value }}-linux-x64.tar.gz
+          path: build/linux/x64/release/bundle

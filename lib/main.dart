@@ -41,11 +41,11 @@ class _HuginnAppState extends State<HuginnApp> {
   void _onAppEvent(AppEvent event) {
     if (event is MessageEvent) {
       final msg = event.message;
-      if (msg.from == _service.currentUserId) return;
-      final peer = _service.peers.where((p) => p.id == msg.from).firstOrNull;
+      final peer = _service.peers.where((p) => p.username == msg.from || p.key == msg.from).firstOrNull;
       final peerName = peer?.username ?? msg.from;
       final text = msg.text.isNotEmpty ? msg.text : (msg.files.isNotEmpty ? '[File]' : '');
       if (text.isEmpty) return;
+      if (msg.from.startsWith(_service.currentUsername ?? _service.currentUserId ?? "")) return;
       if (msg.timestamp.isAfter(lastShown)) {
         NotificationService.showMessageNotification(
           peerId: msg.from,
@@ -130,10 +130,15 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _peers = peers);
     });
     _loadGroups();
+    _loadPeers();
   }
 
   void _loadGroups() {
     setState(() => _groups = widget.service.getGroups());
+  }
+
+  void _loadPeers() {
+    setState(() => _peers = widget.service.getPeers());
   }
 
   @override
@@ -258,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _combinedList(ThemeData theme, ColorScheme colorScheme) {
     if (_groups.isEmpty && _peers.isEmpty) {
+      _loadGroups();
       return _emptyState(Icons.chat_bubble_outline, 'No conversations yet');
     }
 
@@ -360,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
           CircleAvatar(
             backgroundColor: p.online ? Colors.green : Colors.grey[400],
             child: Text(
-              (p.username ?? p.id)[0].toUpperCase(),
+              (p.username ?? p.key)[0].toUpperCase(),
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
@@ -380,8 +386,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      title: Text(p.username ?? p.id, style: const TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: Text(p.id, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+      title: Text(p.username ?? p.key, style: const TextStyle(fontWeight: FontWeight.w500)),
+      subtitle: Text(p.key, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
       trailing: p.online
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -398,8 +404,8 @@ class _HomeScreenState extends State<HomeScreen> {
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             service: widget.service,
-            peerId: p.id,
-            peerName: p.username ?? p.id,
+            peerId: p.key,
+            peerName: p.username ?? p.key,
           ),
         ),
       ),
@@ -424,7 +430,7 @@ class _InviteDialogState extends State<_InviteDialog> {
   @override
   void initState() {
     super.initState();
-    _peers = widget.service.peers;
+    _peers = widget.service.getPeers();
     widget.service.peersStream.listen((peers) {
       if (mounted) setState(() => _peers = peers);
     });
@@ -446,10 +452,10 @@ class _InviteDialogState extends State<_InviteDialog> {
 
   Future<void> _invite(Peer peer) async {
     setState(() => _inviting = true);
-    final ok = widget.service.inviteToGroup(widget.groupUid, peer.id);
+    final ok = widget.service.inviteToGroup(widget.groupUid, peer.key);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? 'Invited ${peer.username ?? peer.id}' : 'Failed to invite')),
+        SnackBar(content: Text(ok ? 'Invited ${peer.username ?? peer.key}' : 'Failed to invite')),
       );
       if (ok) Navigator.pop(context);
     }
@@ -494,10 +500,10 @@ class _InviteDialogState extends State<_InviteDialog> {
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: p.online ? Colors.green : Colors.grey[400],
-                            child: Text((p.username ?? p.id)[0].toUpperCase()),
-                          ),
-                          title: Text(p.username ?? p.id),
-                          subtitle: Text(p.id, style: theme.textTheme.bodySmall),
+                          child: Text((p.username ?? p.key)[0].toUpperCase()),
+                        ),
+                        title: Text(p.username ?? p.key),
+                        subtitle: Text(p.key, style: theme.textTheme.bodySmall),
                           onTap: () => _invite(p),
                         );
                       },
@@ -535,34 +541,27 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollCtrl = ScrollController();
   List<ChatMessage> _msgs = [];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _allLoaded = false;
+  int _loadedOlderCount = 0;
+  static const int _pageSize = 64;
+  StreamSubscription<AppEvent>? _eventSub;
   final List<_AttachedFile> _attachedFiles = [];
 
   @override
   void initState() {
     super.initState();
-    _load();
-    widget.service.events.listen((e) {
-      if (e.type == 'message' || e.type == 'file_ready') _load();
-    });
+    _loadInitial();
+    _eventSub = widget.service.events.listen(_onEvent);
+    _scrollCtrl.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
+    _eventSub?.cancel();
     super.dispose();
-  }
-
-  void _load() {
-    widget.service.getMessages(widget.peerId).then((msgs) {
-      if (mounted) {
-        setState(() {
-          _msgs = msgs;
-          _loading = false;
-        });
-        _scrollToBottom();
-      }
-    });
   }
 
   void _scrollToBottom() {
@@ -586,7 +585,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ok = widget.service.sendMessage(widget.peerId, t);
       if (ok) {
         _msgCtrl.clear();
-        _load();
       }
       return;
     }
@@ -604,7 +602,6 @@ class _ChatScreenState extends State<ChatScreen> {
       if (sent > 0) {
         _msgCtrl.clear();
         setState(() => _attachedFiles.clear());
-        _load();
       }
     }
   }
@@ -632,11 +629,11 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _peerNameFromId(String id) {
-    if (id == widget.service.currentUserId) return 'You';
+  String _peerNameFromLogin(String login) {
+    if (login == widget.service.currentUsername) return 'You';
     final peers = widget.service.peers;
-    final found = peers.where((p) => p.id == id);
-    return found.isNotEmpty ? (found.first.username ?? found.first.id) : id;
+    final found = peers.where((p) => p.username == login || p.key.split(':').first == login);
+    return found.isNotEmpty ? (found.first.username ?? login) : login;
   }
 
   String _formatTime(DateTime dt) {
@@ -673,11 +670,76 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _onEvent(AppEvent e) {
+    if (e is MessageEvent) {
+      final msg = e.message;
+      if (msg.msgId.isNotEmpty && _msgs.any((m) => m.msgId == msg.msgId)) return;
+      setState(() {
+        _msgs.add(msg);
+        _msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      });
+      _scrollToBottom();
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.offset <= 100 && !_loadingMore && !_allLoaded && _msgs.isNotEmpty) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadInitial() async {
+    setState(() => _loading = true);
+    final msgs = await widget.service.getMessagesPaginated(
+      widget.peerId,
+      limit: _pageSize,
+      offset: 0,
+    );
+    if (!mounted) return;
+    setState(() {
+      _msgs = msgs;
+      _loadedOlderCount = msgs.length;
+      _allLoaded = msgs.length < _pageSize;
+      _loading = false;
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _allLoaded) return;
+    setState(() => _loadingMore = true);
+    final oldMax = _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
+    final olderMsgs = await widget.service.getMessagesPaginated(
+      widget.peerId,
+      limit: _pageSize,
+      offset: _loadedOlderCount,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (olderMsgs.isNotEmpty) {
+        _msgs = [...olderMsgs, ..._msgs];
+        _loadedOlderCount += olderMsgs.length;
+      }
+      if (olderMsgs.length < _pageSize) {
+        _allLoaded = true;
+      }
+      _loadingMore = false;
+    });
+    if (olderMsgs.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollCtrl.hasClients) {
+          final newMax = _scrollCtrl.position.maxScrollExtent;
+          _scrollCtrl.jumpTo(_scrollCtrl.offset + (newMax - oldMax));
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    bool isMe(String from) => from == widget.service.currentUserId;
+    bool isMe(String from) => from == widget.service.currentUserId || from.startsWith(widget.service.currentUsername ?? widget.service.currentUserId ?? "");
 
     return Scaffold(
       appBar: AppBar(
@@ -709,9 +771,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     : ListView.builder(
                         controller: _scrollCtrl,
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                        itemCount: _msgs.length,
+                        itemCount: _msgs.length + (_loadingMore ? 1 : 0),
                         itemBuilder: (_, i) {
-                          final m = _msgs[i];
+                          if (_loadingMore && i == 0) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+                            );
+                          }
+                          final idx = _loadingMore ? i - 1 : i;
+                          final m = _msgs[idx];
                           final own = isMe(m.from);
                           return _messageBubble(m, own, theme, colorScheme);
                         },
@@ -758,7 +827,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Padding(
               padding: const EdgeInsets.only(left: 12, bottom: 2),
               child: Text(
-                _peerNameFromId(m.from),
+                _peerNameFromLogin(m.from),
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colorScheme.primary),
               ),
             ),

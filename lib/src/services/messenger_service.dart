@@ -15,6 +15,7 @@ const _uuid = Uuid();
 class MessengerService {
   int _handle = 0;
   String? _currentUserId;
+  String? _currentUsername;
   String? _dbPath;
   Timer? _pollTimer;
   final _eventCtrl = StreamController<AppEvent>.broadcast();
@@ -25,6 +26,7 @@ class MessengerService {
 
   bool get isReady => _handle > 0;
   String? get currentUserId => _currentUserId;
+  String? get currentUsername => _currentUsername;
   Stream<AppEvent> get events => _eventCtrl.stream;
   Stream<List<Peer>> get peersStream => _peersCtrl.stream;
   AppConfig get config => _config;
@@ -48,6 +50,16 @@ class MessengerService {
     final r = bridge.messengerGetGroups(_handle);
     try {
       return (jsonDecode(r) as List).map((e) => GroupChat.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  List<Peer> getPeers() {
+    if (_handle <= 0) return [];
+    final r = bridge.messengerGetPeers(_handle);
+    try {
+      return (jsonDecode(r) as List).map((e) => Peer.fromJson(e as Map<String, dynamic>)).toList();
     } catch (_) {
       return [];
     }
@@ -98,7 +110,7 @@ class MessengerService {
     if (_config.username == username) {
       saveConfig(_config);
     }
-    _loadPeers();
+    loadPeers();
     _startPolling();
     return true;
   }
@@ -167,6 +179,7 @@ class MessengerService {
       try {
         final data = jsonDecode(json) as Map<String, dynamic>;
         _currentUserId = data['id'] as String?;
+        _currentUsername = data['username'] as String?;
       } catch (_) {}
     }
   }
@@ -181,7 +194,7 @@ class MessengerService {
     }
   }
 
-  void _loadPeers() {
+  void loadPeers() {
     if (_handle <= 0) return;
     final json = bridge.messengerGetPeers(_handle);
     if (json.isNotEmpty) {
@@ -192,7 +205,7 @@ class MessengerService {
     }
   }
 
-  void refreshPeers() => _loadPeers();
+  void refreshPeers() => loadPeers();
 
   List<Peer> searchPeers(String query) {
     if (_handle <= 0) return [];
@@ -211,6 +224,20 @@ class MessengerService {
     if (json.isEmpty) return [];
     try {
       return (jsonDecode(json) as List).map((e) => ChatMessage.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<ChatMessage>> getMessagesPaginated(String peerId, {int limit = 64, int offset = 0}) async {
+    if (_handle <= 0) return [];
+    final json = bridge.messengerGetMessagesPaginated(_handle, peerId, limit, offset);
+    if (json.isEmpty) return [];
+    try {
+      final list = (jsonDecode(json) as List)
+          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+          .toList();
+      return list.reversed.toList();
     } catch (_) {
       return [];
     }
@@ -275,7 +302,7 @@ class MessengerService {
     _filePaths.clear();
     _loadMe();
     _loadConfig();
-    _loadPeers();
+    loadPeers();
     _startPolling();
     return true;
   }

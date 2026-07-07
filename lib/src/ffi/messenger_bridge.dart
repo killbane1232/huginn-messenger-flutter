@@ -35,6 +35,9 @@ typedef _StrFnDart = Pointer<Utf8> Function(int);
 typedef _StrStrNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>);
 typedef _StrStrDart = Pointer<Utf8> Function(int, Pointer<Utf8>);
 
+typedef _ThreeIntStrNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>, Int32, Int32);
+typedef _ThreeIntStrDart = Pointer<Utf8> Function(int, Pointer<Utf8>, int, int);
+
 typedef _SendNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>, Pointer<Utf8>, Int32);
 typedef _SendDart = Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>, int);
 
@@ -59,6 +62,7 @@ final _getMe = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_get_me')
 final _getPeers = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_get_peers');
 final _searchPeers = _lib.lookupFunction<_StrStrNative, _StrStrDart>('messenger_search_peers');
 final _getMessages = _lib.lookupFunction<_StrStrNative, _StrStrDart>('messenger_get_messages');
+final _getMessagesPaginated = _lib.lookupFunction<_ThreeIntStrNative, _ThreeIntStrDart>('messenger_get_messages_paginated');
 final _sendMessage = _lib.lookupFunction<_SendNative, _SendDart>('messenger_send_message');
 final _sendFile = _lib.lookupFunction<_SendFileNative, _SendFileDart>('messenger_send_file');
 final _getConfig = _lib.lookupFunction<_StrFnNative, _StrFnDart>('messenger_get_config');
@@ -115,6 +119,13 @@ String messengerSearchPeers(int handle, String query) {
 String messengerGetMessages(int handle, String peerId) {
   final p = peerId.toNativeUtf8();
   final r = _readAndFree(_getMessages(handle, p));
+  calloc.free(p);
+  return r;
+}
+
+String messengerGetMessagesPaginated(int handle, String peerId, int limit, int offset) {
+  final p = peerId.toNativeUtf8();
+  final r = _readAndFree(_getMessagesPaginated(handle, p, limit, offset));
   calloc.free(p);
   return r;
 }

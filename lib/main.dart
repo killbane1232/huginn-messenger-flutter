@@ -41,8 +41,8 @@ class _HuginnAppState extends State<HuginnApp> {
   void _onAppEvent(AppEvent event) {
     if (event is MessageEvent) {
       final msg = event.message;
-      final peer = _service.peers.where((p) => p.username == msg.from || p.key == msg.from).firstOrNull;
-      final peerName = peer?.username ?? msg.from;
+      final peer = _service.peers.where((p) => p.login == msg.from || p.login + ':' + p.signatureKey == msg.from).firstOrNull;
+      final peerName = peer?.login ?? msg.from;
       final text = msg.text.isNotEmpty ? msg.text : (msg.files.isNotEmpty ? '[File]' : '');
       if (text.isEmpty) return;
       if (msg.from.startsWith(_service.currentUsername ?? _service.currentUserId ?? "")) return;
@@ -366,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
           CircleAvatar(
             backgroundColor: p.online ? Colors.green : Colors.grey[400],
             child: Text(
-              (p.username ?? p.key)[0].toUpperCase(),
+              p.login[0].toUpperCase(),
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
@@ -386,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      title: Text(p.username ?? p.key, style: const TextStyle(fontWeight: FontWeight.w500)),
+      title: Text(p.login, style: const TextStyle(fontWeight: FontWeight.w500)),
       subtitle: Text(p.key, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
       trailing: p.online
           ? Container(
@@ -405,7 +405,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => ChatScreen(
             service: widget.service,
             peerId: p.key,
-            peerName: p.username ?? p.key,
+            peerName: p.login,
           ),
         ),
       ),
@@ -455,7 +455,7 @@ class _InviteDialogState extends State<_InviteDialog> {
     final ok = widget.service.inviteToGroup(widget.groupUid, peer.key);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? 'Invited ${peer.username ?? peer.key}' : 'Failed to invite')),
+        SnackBar(content: Text(ok ? 'Invited ${peer.login}' : 'Failed to invite')),
       );
       if (ok) Navigator.pop(context);
     }
@@ -500,9 +500,9 @@ class _InviteDialogState extends State<_InviteDialog> {
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: p.online ? Colors.green : Colors.grey[400],
-                          child: Text((p.username ?? p.key)[0].toUpperCase()),
+                          child: Text((p.login ?? p.key)[0].toUpperCase()),
                         ),
-                        title: Text(p.username ?? p.key),
+                        title: Text(p.login),
                         subtitle: Text(p.key, style: theme.textTheme.bodySmall),
                           onTap: () => _invite(p),
                         );
@@ -632,8 +632,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String _peerNameFromLogin(String login) {
     if (login == widget.service.currentUsername) return 'You';
     final peers = widget.service.peers;
-    final found = peers.where((p) => p.username == login || p.key.split(':').first == login);
-    return found.isNotEmpty ? (found.first.username ?? login) : login;
+    final found = peers.where((p) => p.login == login);
+    return found.isNotEmpty ? (found.first.login ?? login) : login;
   }
 
   String _formatTime(DateTime dt) {

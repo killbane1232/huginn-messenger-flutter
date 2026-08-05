@@ -643,6 +643,21 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  static const _stickers = [
+    '(╯°益°)╯彡┻━┻',
+    '┬─┬ノ( º _ ºノ)',
+    '¯\\_(ツ)_/¯',
+    '(づ｡◕‿‿◕｡)づ',
+    '(ง •̀_•́)ง',
+    '(｡♥‿♥｡)',
+    '(⌐■_■)',
+    'ಠ_ಠ',
+    'ʕ•ᴥ•ʔ',
+    '(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧',
+    '(ಥ﹏ಥ)',
+    '٩(◕‿◕｡)۶',
+  ];
+
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<ChatMessage> _msgs = [];
@@ -718,6 +733,80 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => _attachedFiles.clear());
       }
     }
+  }
+
+  bool _sendSticker(String sticker) {
+    final ok = widget.service.sendMessage(widget.peerId, sticker);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to send sticker')));
+    }
+    return ok;
+  }
+
+  void _showStickers() {
+    FocusScope.of(context).unfocus();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: FractionallySizedBox(
+            heightFactor: 0.55,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  child: Text(
+                    'Stickers',
+                    style: Theme.of(sheetContext).textTheme.titleLarge,
+                  ),
+                ),
+                Expanded(
+                  child: GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 220,
+                          mainAxisExtent: 72,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                        ),
+                    itemCount: _stickers.length,
+                    itemBuilder: (_, index) {
+                      final sticker = _stickers[index];
+                      return OutlinedButton(
+                        onPressed: () {
+                          if (_sendSticker(sticker)) {
+                            Navigator.of(sheetContext).pop();
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colorScheme.onSurface,
+                          side: BorderSide(color: colorScheme.outlineVariant),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: Text(
+                          sticker,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _pickFile() async {
@@ -1149,6 +1238,11 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(Icons.attach_file),
             tooltip: 'Attach file',
             onPressed: _pickFile,
+          ),
+          IconButton(
+            icon: const Icon(Icons.emoji_emotions_outlined),
+            tooltip: 'Stickers',
+            onPressed: _showStickers,
           ),
           const SizedBox(width: 4),
           Expanded(

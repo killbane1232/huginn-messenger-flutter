@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'huginn_messenger.dart';
 import 'src/services/platform_service.dart';
 import 'src/services/notification_service.dart';
@@ -1141,13 +1143,19 @@ class _ChatScreenState extends State<ChatScreen> {
                               padding: const EdgeInsets.only(bottom: 4),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.file(
-                                  File(filePath),
-                                  width:
-                                      MediaQuery.of(context).size.width * 0.6,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, _, _) =>
-                                      _buildFileRow(f, own, colorScheme),
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight:
+                                        MediaQuery.sizeOf(context).height * 0.6,
+                                  ),
+                                  child: Image.file(
+                                    File(filePath),
+                                    width:
+                                        MediaQuery.sizeOf(context).width * 0.6,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, _, _) =>
+                                        _buildFileRow(f, own, colorScheme),
+                                  ),
                                 ),
                               ),
                             );
@@ -1343,9 +1351,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Relogin key'),
-        content: SelectableText(
-          sig,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(12),
+                  child: QrImageView(
+                    data: sig,
+                    size: 280,
+                    backgroundColor: Colors.white,
+                    errorCorrectionLevel: QrErrorCorrectLevel.M,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Scan this code on the device that should use this identity.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('Show text key'),
+                  children: [
+                    SelectableText(
+                      sig,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
         actions: [
           FilledButton(
@@ -1354,6 +1397,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  bool get _canScanQr => Platform.isAndroid;
+
+  Future<void> _scanReloginKey() async {
+    if (!_canScanQr) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('QR scanning is not supported on this platform'),
+        ),
+      );
+      return;
+    }
+
+    final signature = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _ReloginQrScannerScreen()),
+    );
+    if (!mounted || signature == null || signature.trim().isEmpty) return;
+
+    final ok = widget.service.applyReloginSignature(signature.trim());
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? 'Key applied' : 'Failed to apply key')),
     );
   }
 
@@ -1515,6 +1582,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _scanReloginKey,
+              icon: const Icon(Icons.qr_code_scanner, size: 18),
+              label: const Text('Scan relogin QR code'),
+            ),
+          ),
           const SizedBox(height: 32),
           FilledButton.icon(
             onPressed: _save,
@@ -1539,6 +1615,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ReloginQrScannerScreen extends StatefulWidget {
+  const _ReloginQrScannerScreen();
+
+  @override
+  State<_ReloginQrScannerScreen> createState() =>
+      _ReloginQrScannerScreenState();
+}
+
+class _ReloginQrScannerScreenState extends State<_ReloginQrScannerScreen> {
+  final MobileScannerController _controller = MobileScannerController(
+    formats: const [BarcodeFormat.qrCode],
+  );
+  bool _resultReturned = false;
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_resultReturned) return;
+    String? value;
+    for (final barcode in capture.barcodes) {
+      final candidate = barcode.rawValue?.trim();
+      if (candidate != null && candidate.isNotEmpty) {
+        value = candidate;
+        break;
+      }
+    }
+    if (value == null) return;
+
+    _resultReturned = true;
+    await _controller.stop();
+    if (mounted) Navigator.of(context).pop(value);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan relogin QR code')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(controller: _controller, onDetect: _onDetect),
+          IgnorePointer(
+            child: Center(
+              child: Container(
+                width: 260,
+                height: 260,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white, width: 3),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+          ),
+          const Positioned(
+            left: 24,
+            right: 24,
+            bottom: 32,
+            child: Text(
+              'Point the camera at a Huginn relogin QR code',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

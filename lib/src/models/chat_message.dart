@@ -1,5 +1,6 @@
 class ChatMessage {
   final String from;
+  final String chatId;
   final String text;
   final DateTime timestamp;
   final String msgId;
@@ -7,6 +8,7 @@ class ChatMessage {
 
   ChatMessage({
     required this.from,
+    this.chatId = '',
     required this.text,
     required this.timestamp,
     this.msgId = '',
@@ -22,6 +24,7 @@ class ChatMessage {
     }
     return ChatMessage(
       from: json['from'] as String? ?? '',
+      chatId: json['chat_id'] as String? ?? '',
       text: json['text'] as String? ?? '',
       timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
@@ -33,6 +36,7 @@ class ChatMessage {
 
   Map<String, dynamic> toJson() => {
     'from': from,
+    'chat_id': chatId,
     'text': text,
     'timestamp': timestamp.toIso8601String(),
     'msg_id': msgId,

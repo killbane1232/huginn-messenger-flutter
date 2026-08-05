@@ -10,6 +10,17 @@ void main() {
   runApp(const HuginnApp());
 }
 
+String _peerLoginForDisplay(Iterable<Peer> peers, String identity) {
+  for (final peer in peers) {
+    if (peer.login == identity || peer.key == identity) {
+      return peer.login;
+    }
+  }
+
+  final separator = identity.indexOf(':');
+  return separator > 0 ? identity.substring(0, separator) : identity;
+}
+
 class HuginnApp extends StatefulWidget {
   const HuginnApp({super.key});
 
@@ -41,11 +52,18 @@ class _HuginnAppState extends State<HuginnApp> {
   void _onAppEvent(AppEvent event) {
     if (event is MessageEvent) {
       final msg = event.message;
-      final peer = _service.peers.where((p) => p.login == msg.from || p.login + ':' + p.signatureKey == msg.from).firstOrNull;
-      final peerName = peer?.login ?? msg.from;
-      final text = msg.text.isNotEmpty ? msg.text : (msg.files.isNotEmpty ? '[File]' : '');
+      final peerName = _peerLoginForDisplay(_service.peers, msg.from);
+      final text = msg.text.isNotEmpty
+          ? msg.text
+          : (msg.files.isNotEmpty ? '[File]' : '');
       if (text.isEmpty) return;
-      if (msg.from.startsWith(_service.currentUsername ?? _service.currentUserId ?? "")) return;
+      final username = _service.currentUsername;
+      final userId = _service.currentUserId;
+      final isOwn =
+          msg.from == username ||
+          msg.from == userId ||
+          (username != null && msg.from.startsWith('$username:'));
+      if (isOwn) return;
       if (msg.timestamp.isAfter(lastShown)) {
         NotificationService.showMessageNotification(
           peerId: msg.from,
@@ -91,20 +109,20 @@ class _HuginnAppState extends State<HuginnApp> {
       home: _loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _error != null
-              ? Scaffold(
-                  appBar: AppBar(title: const Text('Huginn')),
-                  body: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Error: $_error'),
-                        const SizedBox(height: 16),
-                        FilledButton(onPressed: _init, child: const Text('Retry')),
-                      ],
-                    ),
-                  ),
-                )
-              : HomeScreen(service: _service),
+          ? Scaffold(
+              appBar: AppBar(title: const Text('Huginn')),
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Error: $_error'),
+                    const SizedBox(height: 16),
+                    FilledButton(onPressed: _init, child: const Text('Retry')),
+                  ],
+                ),
+              ),
+            )
+          : HomeScreen(service: _service),
     );
   }
 }
@@ -122,27 +140,41 @@ class _HomeScreenState extends State<HomeScreen> {
   List<GroupChat> _groups = [];
   final _searchCtrl = TextEditingController();
   bool _searching = false;
+  StreamSubscription<List<Peer>>? _peersSub;
+  StreamSubscription<AppEvent>? _eventSub;
+
+  List<Peer> get _visiblePeers {
+    final groupIds = _groups.map((group) => group.uid).toSet();
+    return _peers.where((peer) => !groupIds.contains(peer.login)).toList();
+  }
 
   @override
   void initState() {
     super.initState();
-    widget.service.peersStream.listen((peers) {
+    _peersSub = widget.service.peersStream.listen((peers) {
       if (mounted) setState(() => _peers = peers);
+    });
+    _eventSub = widget.service.events.listen((event) {
+      if (event is MessageEvent) _loadGroups();
     });
     _loadGroups();
     _loadPeers();
   }
 
   void _loadGroups() {
-    setState(() => _groups = widget.service.getGroups());
+    final groups = widget.service.getGroups();
+    if (mounted) setState(() => _groups = groups);
   }
 
   void _loadPeers() {
-    setState(() => _peers = widget.service.getPeers());
+    final peers = widget.service.getPeers();
+    if (mounted) setState(() => _peers = peers);
   }
 
   @override
   void dispose() {
+    _peersSub?.cancel();
+    _eventSub?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -172,8 +204,14 @@ class _HomeScreenState extends State<HomeScreen> {
           onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()), child: const Text('Create')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()),
+            child: const Text('Create'),
+          ),
         ],
       ),
     );
@@ -182,9 +220,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) {
       if (group != null) {
         _loadGroups();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Group "$name" created')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Group "$name" created')));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to create group')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to create group')));
       }
     }
   }
@@ -209,7 +251,9 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'Settings',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => SettingsScreen(service: widget.service)),
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(service: widget.service),
+              ),
             ),
           ),
         ],
@@ -231,9 +275,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(28),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                fillColor: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.4,
+                ),
               ),
               onChanged: _search,
             ),
@@ -262,8 +311,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _combinedList(ThemeData theme, ColorScheme colorScheme) {
-    if (_groups.isEmpty && _peers.isEmpty) {
-      _loadGroups();
+    final peers = _visiblePeers;
+    if (_groups.isEmpty && peers.isEmpty) {
       return _emptyState(Icons.chat_bubble_outline, 'No conversations yet');
     }
 
@@ -279,42 +328,70 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Icon(Icons.group, size: 18, color: colorScheme.primary),
                   const SizedBox(width: 6),
-                  Text('Groups', style: theme.textTheme.titleSmall?.copyWith(color: colorScheme.primary)),
+                  Text(
+                    'Groups',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: colorScheme.primary,
+                    ),
+                  ),
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text('${_groups.length}', style: TextStyle(fontSize: 12, color: colorScheme.onPrimaryContainer)),
+                    child: Text(
+                      '${_groups.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            ..._groups.map((g) => _groupTile(g, theme)),
+            ..._groups.map(_groupTile),
           ],
-          if (_peers.isNotEmpty) ...[
+          if (peers.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Row(
                 children: [
                   Icon(Icons.people, size: 18, color: colorScheme.primary),
                   const SizedBox(width: 6),
-                  Text('Peers', style: theme.textTheme.titleSmall?.copyWith(color: colorScheme.primary)),
+                  Text(
+                    'Peers',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: colorScheme.primary,
+                    ),
+                  ),
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text('${_peers.length}', style: TextStyle(fontSize: 12, color: colorScheme.onPrimaryContainer)),
+                    child: Text(
+                      '${peers.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            ..._peers.map((p) => _peerTile(p, theme)),
+            ...peers.map((p) => _peerTile(p, theme)),
           ],
         ],
       ),
@@ -322,24 +399,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _peersList(ThemeData theme, ColorScheme colorScheme) {
-    if (_peers.isEmpty) {
+    final peers = _visiblePeers;
+    if (peers.isEmpty) {
       return _emptyState(Icons.person_search, 'No peers found');
     }
     return ListView.builder(
       padding: const EdgeInsets.only(top: 4, bottom: 80),
-      itemCount: _peers.length,
-      itemBuilder: (_, i) => _peerTile(_peers[i], theme),
+      itemCount: peers.length,
+      itemBuilder: (_, i) => _peerTile(peers[i], theme),
     );
   }
 
-  Widget _groupTile(GroupChat g, ThemeData theme) {
+  Widget _groupTile(GroupChat g) {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: Colors.indigo,
         child: const Icon(Icons.group, color: Colors.white, size: 22),
       ),
       title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: Text(g.uid, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
       trailing: const Icon(Icons.chevron_right),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onTap: () async {
@@ -366,8 +443,11 @@ class _HomeScreenState extends State<HomeScreen> {
           CircleAvatar(
             backgroundColor: p.online ? Colors.green : Colors.grey[400],
             child: Text(
-              p.login[0].toUpperCase(),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              p.login.isNotEmpty ? p.login[0].toUpperCase() : '?',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           if (p.online)
@@ -380,14 +460,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: BoxDecoration(
                   color: Colors.green,
                   shape: BoxShape.circle,
-                  border: Border.all(color: theme.scaffoldBackgroundColor, width: 2),
+                  border: Border.all(
+                    color: theme.scaffoldBackgroundColor,
+                    width: 2,
+                  ),
                 ),
               ),
             ),
         ],
       ),
       title: Text(p.login, style: const TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: Text(p.key, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
       trailing: p.online
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -395,7 +477,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.green.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text('online', style: TextStyle(fontSize: 11, color: Colors.green)),
+              child: const Text(
+                'online',
+                style: TextStyle(fontSize: 11, color: Colors.green),
+              ),
             )
           : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -444,9 +529,7 @@ class _InviteDialogState extends State<_InviteDialog> {
 
   void _search(String q) {
     setState(() {
-      _peers = q.isEmpty
-          ? widget.service.peers
-          : widget.service.searchPeers(q);
+      _peers = q.isEmpty ? widget.service.peers : widget.service.searchPeers(q);
     });
   }
 
@@ -455,7 +538,9 @@ class _InviteDialogState extends State<_InviteDialog> {
     final ok = widget.service.inviteToGroup(widget.groupUid, peer.key);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? 'Invited ${peer.login}' : 'Failed to invite')),
+        SnackBar(
+          content: Text(ok ? 'Invited ${peer.login}' : 'Failed to invite'),
+        ),
       );
       if (ok) Navigator.pop(context);
     }
@@ -479,9 +564,13 @@ class _InviteDialogState extends State<_InviteDialog> {
               decoration: InputDecoration(
                 hintText: 'Search peers...',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(28)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(28),
+                ),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                fillColor: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.4,
+                ),
               ),
               onChanged: _search,
             ),
@@ -499,11 +588,16 @@ class _InviteDialogState extends State<_InviteDialog> {
                         final p = _peers[i];
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: p.online ? Colors.green : Colors.grey[400],
-                          child: Text((p.login ?? p.key)[0].toUpperCase()),
-                        ),
-                        title: Text(p.login),
-                        subtitle: Text(p.key, style: theme.textTheme.bodySmall),
+                            backgroundColor: p.online
+                                ? Colors.green
+                                : Colors.grey[400],
+                            child: Text(
+                              p.login.isNotEmpty
+                                  ? p.login[0].toUpperCase()
+                                  : '?',
+                            ),
+                          ),
+                          title: Text(p.login),
                           onTap: () => _invite(p),
                         );
                       },
@@ -513,7 +607,10 @@ class _InviteDialogState extends State<_InviteDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
       ],
     );
   }
@@ -591,13 +688,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
     var sent = 0;
     for (var i = 0; i < _attachedFiles.length; i++) {
-      final ok = widget.service.sendFile(widget.peerId, t, _attachedFiles[i].path);
+      final ok = widget.service.sendFile(
+        widget.peerId,
+        t,
+        _attachedFiles[i].path,
+      );
       if (ok) sent++;
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(sent > 0 ? '$sent file(s) sent' : 'Failed to send files')),
+        SnackBar(
+          content: Text(
+            sent > 0 ? '$sent file(s) sent' : 'Failed to send files',
+          ),
+        ),
       );
       if (sent > 0) {
         _msgCtrl.clear();
@@ -625,15 +730,20 @@ class _ChatScreenState extends State<ChatScreen> {
   void _invite() {
     showDialog(
       context: context,
-      builder: (ctx) => _InviteDialog(service: widget.service, groupUid: widget.peerId),
+      builder: (ctx) =>
+          _InviteDialog(service: widget.service, groupUid: widget.peerId),
     );
   }
 
-  String _peerNameFromLogin(String login) {
-    if (login == widget.service.currentUsername) return 'You';
-    final peers = widget.service.peers;
-    final found = peers.where((p) => p.login == login);
-    return found.isNotEmpty ? (found.first.login ?? login) : login;
+  String _peerNameForDisplay(String identity) {
+    final username = widget.service.currentUsername;
+    final userId = widget.service.currentUserId;
+    if (identity == username ||
+        identity == userId ||
+        (username != null && identity.startsWith('$username:'))) {
+      return 'You';
+    }
+    return _peerLoginForDisplay(widget.service.peers, identity);
   }
 
   String _formatTime(DateTime dt) {
@@ -653,7 +763,11 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.attach_file, size: 14, color: own ? colorScheme.onPrimary : colorScheme.onSurface),
+          Icon(
+            Icons.attach_file,
+            size: 14,
+            color: own ? colorScheme.onPrimary : colorScheme.onSurface,
+          ),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
@@ -673,17 +787,47 @@ class _ChatScreenState extends State<ChatScreen> {
   void _onEvent(AppEvent e) {
     if (e is MessageEvent) {
       final msg = e.message;
-      if (msg.msgId.isNotEmpty && _msgs.any((m) => m.msgId == msg.msgId)) return;
-      setState(() {
-        _msgs.add(msg);
-        _msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      });
-      _scrollToBottom();
+      if (msg.chatId.isEmpty) {
+        unawaited(_appendLegacyEventIfCurrent(msg));
+        return;
+      }
+      if (msg.chatId != widget.peerId) return;
+      _appendMessage(msg);
     }
   }
 
+  void _appendMessage(ChatMessage message) {
+    if (message.msgId.isNotEmpty &&
+        _msgs.any((item) => item.msgId == message.msgId)) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _msgs.add(message);
+      _msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _appendLegacyEventIfCurrent(ChatMessage eventMessage) async {
+    if (eventMessage.msgId.isEmpty) return;
+    final latest = await widget.service.getMessagesPaginated(
+      widget.peerId,
+      limit: _pageSize,
+      offset: 0,
+    );
+    if (!mounted) return;
+    final matching = latest.where(
+      (message) => message.msgId == eventMessage.msgId,
+    );
+    if (matching.isNotEmpty) _appendMessage(matching.first);
+  }
+
   void _onScroll() {
-    if (_scrollCtrl.offset <= 100 && !_loadingMore && !_allLoaded && _msgs.isNotEmpty) {
+    if (_scrollCtrl.offset <= 100 &&
+        !_loadingMore &&
+        !_allLoaded &&
+        _msgs.isNotEmpty) {
       _loadMore();
     }
   }
@@ -708,7 +852,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadMore() async {
     if (_loadingMore || _allLoaded) return;
     setState(() => _loadingMore = true);
-    final oldMax = _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
+    final oldMax = _scrollCtrl.hasClients
+        ? _scrollCtrl.position.maxScrollExtent
+        : 0.0;
     final olderMsgs = await widget.service.getMessagesPaginated(
       widget.peerId,
       limit: _pageSize,
@@ -739,7 +885,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    bool isMe(String from) => from == widget.service.currentUserId || from.startsWith(widget.service.currentUsername ?? widget.service.currentUserId ?? "");
+    bool isMe(String from) {
+      final username = widget.service.currentUsername;
+      final userId = widget.service.currentUserId;
+      return from == username ||
+          from == userId ||
+          (username != null && from.startsWith('$username:'));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -748,7 +900,12 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Text(widget.peerName, style: const TextStyle(fontSize: 16)),
             if (widget.isGroup)
-              Text('Group', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+              Text(
+                'Group',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
           ],
         ),
         centerTitle: false,
@@ -767,24 +924,30 @@ class _ChatScreenState extends State<ChatScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _msgs.isEmpty
-                    ? _emptyChat(theme)
-                    : ListView.builder(
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                        itemCount: _msgs.length + (_loadingMore ? 1 : 0),
-                        itemBuilder: (_, i) {
-                          if (_loadingMore && i == 0) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 16),
-                              child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
-                            );
-                          }
-                          final idx = _loadingMore ? i - 1 : i;
-                          final m = _msgs[idx];
-                          final own = isMe(m.from);
-                          return _messageBubble(m, own, theme, colorScheme);
-                        },
-                      ),
+                ? _emptyChat(theme)
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    itemCount: _msgs.length + (_loadingMore ? 1 : 0),
+                    itemBuilder: (_, i) {
+                      if (_loadingMore && i == 0) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        );
+                      }
+                      final idx = _loadingMore ? i - 1 : i;
+                      final m = _msgs[idx];
+                      final own = isMe(m.from);
+                      return _messageBubble(m, own, theme, colorScheme);
+                    },
+                  ),
           ),
           if (_attachedFiles.isNotEmpty) _attachedFilesBar(colorScheme),
           _inputBar(colorScheme),
@@ -800,9 +963,13 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey[400]),
           const SizedBox(height: 12),
-          Text('No messages yet', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+          Text(
+            'No messages yet',
+            style: TextStyle(color: Colors.grey[500], fontSize: 16),
+          ),
           const SizedBox(height: 4),
-          Text('Send a message to start the conversation',
+          Text(
+            'Send a message to start the conversation',
             style: TextStyle(color: Colors.grey[400], fontSize: 13),
           ),
         ],
@@ -810,7 +977,12 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _messageBubble(ChatMessage m, bool own, ThemeData theme, ColorScheme colorScheme) {
+  Widget _messageBubble(
+    ChatMessage m,
+    bool own,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
     final borderRadius = BorderRadius.only(
       topLeft: const Radius.circular(18),
       topRight: const Radius.circular(18),
@@ -821,19 +993,27 @@ class _ChatScreenState extends State<ChatScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
-        crossAxisAlignment: own ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: own
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           if (widget.isGroup && !own)
             Padding(
               padding: const EdgeInsets.only(left: 12, bottom: 2),
               child: Text(
-                _peerNameFromLogin(m.from),
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colorScheme.primary),
+                _peerNameForDisplay(m.from),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.primary,
+                ),
               ),
             ),
           Row(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: own ? MainAxisAlignment.end : MainAxisAlignment.start,
+            mainAxisAlignment: own
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
             children: [
               if (!own) const SizedBox(width: 8),
               Flexible(
@@ -841,9 +1021,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   constraints: BoxConstraints(
                     maxWidth: MediaQuery.of(context).size.width * 0.72,
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
-                    color: own ? colorScheme.primary : colorScheme.surfaceContainerHigh,
+                    color: own
+                        ? colorScheme.primary
+                        : colorScheme.surfaceContainerHigh,
                     borderRadius: borderRadius,
                   ),
                   child: Column(
@@ -860,9 +1045,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                 borderRadius: BorderRadius.circular(8),
                                 child: Image.file(
                                   File(filePath),
-                                  width: MediaQuery.of(context).size.width * 0.6,
+                                  width:
+                                      MediaQuery.of(context).size.width * 0.6,
                                   fit: BoxFit.contain,
-                                  errorBuilder: (_, _, _) => _buildFileRow(f, own, colorScheme),
+                                  errorBuilder: (_, _, _) =>
+                                      _buildFileRow(f, own, colorScheme),
                                 ),
                               ),
                             );
@@ -871,11 +1058,15 @@ class _ChatScreenState extends State<ChatScreen> {
                         }),
                       if (m.text.isNotEmpty)
                         Padding(
-                          padding: EdgeInsets.only(top: m.files.isNotEmpty ? 4 : 0),
+                          padding: EdgeInsets.only(
+                            top: m.files.isNotEmpty ? 4 : 0,
+                          ),
                           child: Text(
                             m.text,
                             style: TextStyle(
-                              color: own ? colorScheme.onPrimary : colorScheme.onSurface,
+                              color: own
+                                  ? colorScheme.onPrimary
+                                  : colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -884,7 +1075,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         _formatTime(m.timestamp),
                         style: TextStyle(
                           fontSize: 10,
-                          color: own ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant,
+                          color: own
+                              ? colorScheme.onPrimary.withValues(alpha: 0.7)
+                              : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -905,7 +1098,9 @@ class _ChatScreenState extends State<ChatScreen> {
       padding: const EdgeInsets.only(left: 8),
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        border: Border(top: BorderSide(color: colorScheme.outlineVariant, width: 0.5)),
+        border: Border(
+          top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
+        ),
       ),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
@@ -919,7 +1114,9 @@ class _ChatScreenState extends State<ChatScreen> {
               label: Text(f.name, style: const TextStyle(fontSize: 13)),
               deleteIcon: const Icon(Icons.close, size: 16),
               onDeleted: () => _removeFile(i),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
             ),
           );
         },
@@ -932,7 +1129,9 @@ class _ChatScreenState extends State<ChatScreen> {
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 12),
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        border: Border(top: BorderSide(color: colorScheme.outlineVariant, width: 0.5)),
+        border: Border(
+          top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -956,8 +1155,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   borderSide: BorderSide.none,
                 ),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                fillColor: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.5,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
               onSubmitted: (_) => _send(),
             ),
@@ -968,7 +1172,9 @@ class _ChatScreenState extends State<ChatScreen> {
             style: FilledButton.styleFrom(
               minimumSize: const Size(46, 46),
               padding: const EdgeInsets.all(0),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
             ),
             child: const Icon(Icons.send, size: 20),
           ),
@@ -993,7 +1199,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _uCtrl, _mCtrl, _turnAddrCtrl, _turnUserCtrl, _turnPassCtrl;
+  late TextEditingController _uCtrl,
+      _mCtrl,
+      _turnAddrCtrl,
+      _turnUserCtrl,
+      _turnPassCtrl;
   String _ttl = '1w';
 
   @override
@@ -1021,15 +1231,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _generateReloginKey() {
     final sig = widget.service.generateReloginSignature();
     if (sig == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to generate key')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to generate key')));
       return;
     }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Relogin key'),
-        content: SelectableText(sig, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
-        actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        content: SelectableText(
+          sig,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -1049,13 +1269,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               final ok = widget.service.applyReloginSignature(ctrl.text.trim());
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(ok ? 'Key applied' : 'Failed to apply key')),
+                SnackBar(
+                  content: Text(ok ? 'Key applied' : 'Failed to apply key'),
+                ),
               );
             },
             child: const Text('Apply'),
@@ -1071,21 +1296,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (username != oldUsername) {
       widget.service.setUsername(username).then((ok) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
         }
       });
       return;
     }
-    final ok = widget.service.saveConfig(AppConfig(
-      username: username,
-      muninnAddr: _mCtrl.text.trim(),
-      chunkTtl: _ttl,
-      turnAddr: _turnAddrCtrl.text.trim(),
-      turnUser: _turnUserCtrl.text.trim(),
-      turnPass: _turnPassCtrl.text.trim(),
-    ));
+    final ok = widget.service.saveConfig(
+      AppConfig(
+        username: username,
+        muninnAddr: _mCtrl.text.trim(),
+        chunkTtl: _ttl,
+        turnAddr: _turnAddrCtrl.text.trim(),
+        turnUser: _turnUserCtrl.text.trim(),
+        turnPass: _turnPassCtrl.text.trim(),
+      ),
+    );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
     }
   }
 
@@ -1103,17 +1334,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _uCtrl,
-            decoration: const InputDecoration(labelText: 'Username', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Username',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _mCtrl,
-            decoration: const InputDecoration(labelText: 'Muninn server', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Muninn server',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _ttl,
-            decoration: const InputDecoration(labelText: 'Chunk TTL', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Chunk TTL',
+              border: OutlineInputBorder(),
+            ),
             items: const [
               DropdownMenuItem(value: '1d', child: Text('1 day')),
               DropdownMenuItem(value: '1w', child: Text('1 week')),
@@ -1188,7 +1428,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Icon(icon, size: 18, color: colorScheme.primary),
         const SizedBox(width: 6),
-        Text(label, style: TextStyle(fontWeight: FontWeight.w600, color: colorScheme.primary)),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: colorScheme.primary,
+          ),
+        ),
       ],
     );
   }

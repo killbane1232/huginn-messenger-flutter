@@ -19,7 +19,8 @@ class Peer {
     signatureKey: json['signature_key'] as String? ?? '',
     online: json['online'] as bool? ?? false,
     lastSeen: json['last_seen'] != null
-        ? DateTime.tryParse(json['last_seen'] as String) ?? DateTime.fromMillisecondsSinceEpoch(0)
+        ? DateTime.tryParse(json['last_seen'] as String) ??
+              DateTime.fromMillisecondsSinceEpoch(0)
         : DateTime.fromMillisecondsSinceEpoch(0),
   );
 
@@ -29,9 +30,22 @@ class Peer {
     'last_seen': lastSeen.toIso8601String(),
   };
 
-  String get key => "$login:$signatureKey";
+  String get displayLogin {
+    final value = login.trim();
+    final signatureSuffix = signatureKey.isEmpty ? '' : ':$signatureKey';
+    if (signatureSuffix.isNotEmpty && value.endsWith(signatureSuffix)) {
+      return value.substring(0, value.length - signatureSuffix.length);
+    }
+
+    final separator = value.indexOf(':');
+    return separator > 0 ? value.substring(0, separator) : value;
+  }
+
+  String get key =>
+      signatureKey.isEmpty ? displayLogin : '$displayLogin:$signatureKey';
   @override
-  bool operator ==(Object other) => identical(this, other) || other is Peer && key == other.key;
+  bool operator ==(Object other) =>
+      identical(this, other) || other is Peer && key == other.key;
   @override
   int get hashCode => key.hashCode;
 }

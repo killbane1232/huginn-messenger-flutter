@@ -12,8 +12,10 @@ void main() {
 
 String _peerLoginForDisplay(Iterable<Peer> peers, String identity) {
   for (final peer in peers) {
-    if (peer.login == identity || peer.key == identity) {
-      return peer.login;
+    if (peer.login == identity ||
+        peer.displayLogin == identity ||
+        peer.key == identity) {
+      return peer.displayLogin;
     }
   }
 
@@ -145,7 +147,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Peer> get _visiblePeers {
     final groupIds = _groups.map((group) => group.uid).toSet();
-    return _peers.where((peer) => !groupIds.contains(peer.login)).toList();
+    return _peers
+        .where((peer) => !groupIds.contains(peer.displayLogin))
+        .toList();
   }
 
   @override
@@ -443,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> {
           CircleAvatar(
             backgroundColor: p.online ? Colors.green : Colors.grey[400],
             child: Text(
-              p.login.isNotEmpty ? p.login[0].toUpperCase() : '?',
+              p.displayLogin.isNotEmpty ? p.displayLogin[0].toUpperCase() : '?',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -469,7 +473,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      title: Text(p.login, style: const TextStyle(fontWeight: FontWeight.w500)),
+      title: Text(
+        p.displayLogin,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
       trailing: p.online
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -490,7 +497,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => ChatScreen(
             service: widget.service,
             peerId: p.key,
-            peerName: p.login,
+            peerName: p.displayLogin,
           ),
         ),
       ),
@@ -539,7 +546,9 @@ class _InviteDialogState extends State<_InviteDialog> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok ? 'Invited ${peer.login}' : 'Failed to invite'),
+          content: Text(
+            ok ? 'Invited ${peer.displayLogin}' : 'Failed to invite',
+          ),
         ),
       );
       if (ok) Navigator.pop(context);
@@ -592,12 +601,12 @@ class _InviteDialogState extends State<_InviteDialog> {
                                 ? Colors.green
                                 : Colors.grey[400],
                             child: Text(
-                              p.login.isNotEmpty
-                                  ? p.login[0].toUpperCase()
+                              p.displayLogin.isNotEmpty
+                                  ? p.displayLogin[0].toUpperCase()
                                   : '?',
                             ),
                           ),
-                          title: Text(p.login),
+                          title: Text(p.displayLogin),
                           onTap: () => _invite(p),
                         );
                       },

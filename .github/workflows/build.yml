@@ -51,10 +51,42 @@ jobs:
         id: version
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            VERSION_NAME="${GITHUB_REF#refs/tags/v}"
+            if [[ ! "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Tag must use a SemVer-compatible form such as v1.2.3" >&2
+              exit 1
+            fi
+            ARTIFACT_VERSION="$VERSION_NAME"
           else
-            echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+            VERSION_NAME="$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*$/\1/p' pubspec.yaml)"
+            ARTIFACT_VERSION="$(git rev-parse --short HEAD)"
           fi
+          if [[ -z "$VERSION_NAME" ]]; then
+            echo "Could not determine the application version" >&2
+            exit 1
+          fi
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "value=$ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Android release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=()
+          [[ -n "$ANDROID_KEYSTORE_BASE64" ]] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "$ANDROID_KEY_ALIAS" ]] || missing+=(ANDROID_KEY_ALIAS)
+          [[ -n "$ANDROID_KEY_PASSWORD" ]] || missing+=(ANDROID_KEY_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "Missing GitHub Actions secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/huginn-release.jks"
 
       - name: Build Go shared library (Linux host)
         run: |
@@ -92,7 +124,15 @@ jobs:
           done
 
       - name: Build Flutter APK
-        run: flutter build apk --release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/huginn-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          flutter build apk --release
+          --build-name="${{ steps.version.outputs.name }}"
+          --build-number="${{ steps.version.outputs.code }}"
 
       - name: Build Flutter Linux app
         run: flutter build linux --release

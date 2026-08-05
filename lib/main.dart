@@ -25,6 +25,14 @@ String _peerLoginForDisplay(Iterable<Peer> peers, String identity) {
   return separator > 0 ? identity.substring(0, separator) : identity;
 }
 
+bool _needsLoginSetup(String? username) {
+  final value = username?.trim() ?? '';
+  if (value.isEmpty) return true;
+  return RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  ).hasMatch(value);
+}
+
 class HuginnApp extends StatefulWidget {
   const HuginnApp({super.key});
 
@@ -35,6 +43,7 @@ class HuginnApp extends StatefulWidget {
 class _HuginnAppState extends State<HuginnApp> {
   final _service = MessengerService();
   bool _loading = true;
+  bool _needsLogin = false;
   String? _error;
   StreamSubscription<AppEvent>? _eventSub;
   DateTime lastShown = DateTime.now();
@@ -89,7 +98,11 @@ class _HuginnAppState extends State<HuginnApp> {
     if (mounted) {
       setState(() {
         _loading = false;
-        if (!ok) _error = 'Failed to init messenger';
+        if (!ok) {
+          _error = 'Failed to init messenger';
+        } else {
+          _needsLogin = _needsLoginSetup(_service.currentUsername);
+        }
       });
     }
   }
@@ -126,7 +139,182 @@ class _HuginnAppState extends State<HuginnApp> {
                 ),
               ),
             )
+          : _needsLogin
+          ? FirstLoginScreen(
+              service: _service,
+              onComplete: () {
+                if (mounted) setState(() => _needsLogin = false);
+              },
+            )
           : HomeScreen(service: _service),
+    );
+  }
+}
+
+class FirstLoginScreen extends StatefulWidget {
+  final MessengerService service;
+  final VoidCallback onComplete;
+
+  const FirstLoginScreen({
+    super.key,
+    required this.service,
+    required this.onComplete,
+  });
+
+  @override
+  State<FirstLoginScreen> createState() => _FirstLoginScreenState();
+}
+
+class _FirstLoginScreenState extends State<FirstLoginScreen> {
+  final _loginCtrl = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _loginCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveLogin() async {
+    final login = _loginCtrl.text.trim();
+    if (login.isEmpty) {
+      setState(() => _error = 'Enter a login');
+      return;
+    }
+    if (_needsLoginSetup(login)) {
+      setState(() => _error = 'Login cannot be a UUID');
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final ok = await widget.service.setUsername(login);
+    if (!mounted) return;
+    if (ok) {
+      widget.onComplete();
+    } else {
+      setState(() {
+        _busy = false;
+        _error = 'Failed to save login';
+      });
+    }
+  }
+
+  Future<void> _scanReloginQr() async {
+    if (!Platform.isAndroid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('QR scanning is only available on Android'),
+        ),
+      );
+      return;
+    }
+
+    final signature = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _ReloginQrScannerScreen()),
+    );
+    if (!mounted || signature == null || signature.trim().isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final ok = widget.service.applyReloginSignature(signature.trim());
+    if (!mounted) return;
+    if (ok && !_needsLoginSetup(widget.service.currentUsername)) {
+      widget.onComplete();
+    } else {
+      setState(() {
+        _busy = false;
+        _error = 'Failed to apply relogin QR code';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.hub, size: 72, color: colorScheme.primary),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Welcome to Huginn',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Choose a login or restore your identity from another device.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 28),
+                  TextField(
+                    controller: _loginCtrl,
+                    autofocus: true,
+                    enabled: !_busy,
+                    textInputAction: TextInputAction.done,
+                    decoration: InputDecoration(
+                      labelText: 'Login',
+                      hintText: 'Your login',
+                      prefixIcon: const Icon(Icons.person_outline),
+                      border: const OutlineInputBorder(),
+                      errorText: _error,
+                    ),
+                    onSubmitted: (_) => _saveLogin(),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _busy ? null : _saveLogin,
+                      child: const Text('Continue'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          'or',
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                      const Expanded(child: Divider()),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _busy ? null : _scanReloginQr,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan relogin QR code'),
+                    ),
+                  ),
+                  if (_busy) ...[
+                    const SizedBox(height: 20),
+                    const CircularProgressIndicator(),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -658,6 +846,8 @@ class _ChatScreenState extends State<ChatScreen> {
     '(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧',
     '(ಥ﹏ಥ)',
     '٩(◕‿◕｡)۶',
+    '(＃`Д´)',
+    '◯０o。(ー。ー)y~~',
   ];
 
   final _msgCtrl = TextEditingController();
@@ -812,7 +1002,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    final result = await FilePicker.pickFiles(allowMultiple: true);
     if (result == null || result.files.isEmpty) return;
     setState(() {
       for (final f in result.files) {

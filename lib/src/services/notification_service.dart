@@ -19,7 +19,7 @@ class NotificationService {
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     );
-    await _androidPlugin!.initialize(settings);
+    await _androidPlugin!.initialize(settings: settings);
 
     final android = _androidPlugin!
         .resolvePlatformSpecificImplementation<
@@ -56,10 +56,10 @@ class NotificationService {
       icon: '@drawable/ic_notification',
     );
     await _androidPlugin!.show(
-      peerId.hashCode,
-      peerName,
-      text,
-      const NotificationDetails(android: androidDetails),
+      id: peerId.hashCode,
+      title: peerName,
+      body: text,
+      notificationDetails: const NotificationDetails(android: androidDetails),
       payload: peerId,
     );
   }

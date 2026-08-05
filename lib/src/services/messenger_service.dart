@@ -86,7 +86,8 @@ class MessengerService {
   bool applyReloginSignature(String signature) {
     if (_handle <= 0) return false;
     final r = bridge.messengerApplyReloginSignature(_handle, signature);
-    return r.contains('"ok"');
+    if (!r.contains('"ok"')) return false;
+    return _recreate(_currentUsername ?? _config.username);
   }
 
   Future<bool> init({
@@ -288,10 +289,18 @@ class MessengerService {
       turnPass: _config.turnPass,
     );
     if (!saveConfig(newConfig)) return false;
+    return _recreate(username);
+  }
+
+  bool _recreate(String username) {
+    if (_handle <= 0 || _dbPath == null || username.isEmpty) return false;
     _pollTimer?.cancel();
     bridge.messengerDestroy(_handle);
     _handle = bridge.messengerCreate(
-      username, _config.muninnAddr, _dbPath!, _config.chunkTtl,
+      username,
+      _config.muninnAddr,
+      _dbPath!,
+      _config.chunkTtl,
       turnAddr: _config.turnAddr,
       turnUser: _config.turnUser,
       turnPass: _config.turnPass,

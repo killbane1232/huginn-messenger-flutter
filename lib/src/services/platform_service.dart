@@ -3,8 +3,12 @@ import 'package:flutter/services.dart';
 import 'messenger_service.dart';
 
 class PlatformService {
-  static const _androidChannel = MethodChannel('com.example.huginn_messenger/background');
-  static const _platformChannel = MethodChannel('com.example.huginn_messenger/platform');
+  static const _androidChannel = MethodChannel(
+    'com.example.huginn_messenger/background',
+  );
+  static const _platformChannel = MethodChannel(
+    'com.example.huginn_messenger/platform',
+  );
   static bool _initialized = false;
 
   static Future<void> init(MessengerService service) async {
@@ -12,6 +16,9 @@ class PlatformService {
     _initialized = true;
 
     if (Platform.isAndroid) {
+      if (!await hasAllFilesAccess()) {
+        await requestAllFilesAccess();
+      }
       await _startAndroidService();
       await _setupAndroidDownloads(service);
     }
@@ -39,7 +46,9 @@ class PlatformService {
 
   static Future<void> _setupAndroidDownloads(MessengerService service) async {
     try {
-      final dir = await _platformChannel.invokeMethod<String>('getDownloadsDir');
+      final dir = await _platformChannel.invokeMethod<String>(
+        'getDownloadsDir',
+      );
       if (dir != null && dir.isNotEmpty) {
         service.setDownloadsDir(dir);
       }
@@ -49,8 +58,10 @@ class PlatformService {
   static Future<bool> hasAllFilesAccess() async {
     if (!Platform.isAndroid) return true;
     try {
-      final result = await _platformChannel.invokeMethod<bool>('hasAllFilesAccess');
-      return result ?? true;
+      final result = await _platformChannel.invokeMethod<bool>(
+        'hasAllFilesAccess',
+      );
+      return result ?? false;
     } catch (_) {
       return false;
     }
@@ -64,10 +75,30 @@ class PlatformService {
   }
 
   static Future<bool> openFile(String path) async {
-    if (!Platform.isAndroid) return false;
     try {
-      final result = await _platformChannel.invokeMethod<bool>('openFile', {'path': path});
-      return result ?? false;
+      if (Platform.isAndroid) {
+        final result = await _platformChannel.invokeMethod<bool>('openFile', {
+          'path': path,
+        });
+        return result ?? false;
+      }
+      if (Platform.isLinux) {
+        await Process.start('xdg-open', [
+          path,
+        ], mode: ProcessStartMode.detached);
+        return true;
+      }
+      if (Platform.isMacOS) {
+        await Process.start('open', [path], mode: ProcessStartMode.detached);
+        return true;
+      }
+      if (Platform.isWindows) {
+        await Process.start('explorer.exe', [
+          path,
+        ], mode: ProcessStartMode.detached);
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }

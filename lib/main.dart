@@ -49,7 +49,8 @@ class _HuginnAppState extends State<HuginnApp> {
   String? _pendingNotificationChatId;
   bool _notificationNavigationScheduled = false;
   StreamSubscription<AppEvent>? _eventSub;
-  DateTime lastShown = DateTime.now();
+  final Set<String> _notifiedMessageKeys = {};
+  final List<String> _notifiedMessageOrder = [];
 
   @override
   void initState() {
@@ -81,15 +82,30 @@ class _HuginnAppState extends State<HuginnApp> {
           msg.from == userId ||
           (username != null && msg.from.startsWith('$username:'));
       if (isOwn) return;
-      if (msg.timestamp.isAfter(lastShown)) {
+      if (!_markMessageForNotification(msg, chatId)) return;
+      unawaited(
         NotificationService.showMessageNotification(
           chatId: chatId,
           peerName: peerName,
           text: text,
-        );
-        lastShown = msg.timestamp;
-      }
+        ),
+      );
     }
+  }
+
+  bool _markMessageForNotification(ChatMessage msg, String chatId) {
+    final key = msg.msgId.isNotEmpty
+        ? msg.msgId
+        : '${msg.from}\u0000$chatId\u0000${msg.timestamp.toUtc().microsecondsSinceEpoch}'
+              '\u0000${msg.text}';
+    if (!_notifiedMessageKeys.add(key)) return false;
+
+    _notifiedMessageOrder.add(key);
+    const maxRememberedMessages = 256;
+    if (_notifiedMessageOrder.length > maxRememberedMessages) {
+      _notifiedMessageKeys.remove(_notifiedMessageOrder.removeAt(0));
+    }
+    return true;
   }
 
   String _notificationChatName(String chatId, String senderId) {
@@ -418,6 +434,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _minSearchLength = 3;
+
   List<Peer> _peers = [];
   List<GroupChat> _groups = [];
   final _searchCtrl = TextEditingController();
@@ -432,11 +450,21 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
+  List<GroupChat> get _visibleGroups {
+    if (!_searching) return _groups;
+
+    final query = _searchCtrl.text.trim().toLowerCase();
+    return _groups.where((group) {
+      return group.name.toLowerCase().contains(query) ||
+          group.uid.toLowerCase().contains(query);
+    }).toList();
+  }
+
   @override
   void initState() {
     super.initState();
     _peersSub = widget.service.peersStream.listen((peers) {
-      if (mounted) setState(() => _peers = peers);
+      if (mounted && !_searching) setState(() => _peers = peers);
     });
     _eventSub = widget.service.events.listen((event) {
       if (event is MessageEvent) _loadGroups();
@@ -464,12 +492,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _search(String q) {
-    setState(() => _searching = q.isNotEmpty);
-    if (q.isEmpty) {
-      setState(() => _peers = widget.service.peers);
-    } else {
-      setState(() => _peers = widget.service.searchPeers(q));
+    final query = q.trim();
+    if (query.length < _minSearchLength) {
+      setState(() {
+        _searching = false;
+        _peers = widget.service.peers;
+      });
+      return;
     }
+
+    final peers = widget.service.searchPeers(query);
+    setState(() {
+      _searching = true;
+      _peers = peers;
+    });
   }
 
   Future<void> _createGroup() async {
@@ -554,7 +590,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
-                hintText: 'Search peers...',
+                hintText: 'Search peers or groups (3+ characters)...',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(28),
@@ -571,11 +607,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onChanged: _search,
             ),
           ),
-          Expanded(
-            child: _searching
-                ? _peersList(theme, colorScheme)
-                : _combinedList(theme, colorScheme),
-          ),
+          Expanded(child: _combinedList(theme, colorScheme)),
         ],
       ),
     );
@@ -596,8 +628,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _combinedList(ThemeData theme, ColorScheme colorScheme) {
     final peers = _visiblePeers;
-    if (_groups.isEmpty && peers.isEmpty) {
-      return _emptyState(Icons.chat_bubble_outline, 'No conversations yet');
+    final groups = _visibleGroups;
+    if (groups.isEmpty && peers.isEmpty) {
+      return _emptyState(
+        _searching ? Icons.search_off : Icons.chat_bubble_outline,
+        _searching ? 'No peers or groups found' : 'No conversations yet',
+      );
     }
 
     return RefreshIndicator(
@@ -605,7 +641,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 80),
         children: [
-          if (_groups.isNotEmpty) ...[
+          if (groups.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Row(
@@ -629,7 +665,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${_groups.length}',
+                      '${groups.length}',
                       style: TextStyle(
                         fontSize: 12,
                         color: colorScheme.onPrimaryContainer,
@@ -639,7 +675,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            ..._groups.map(_groupTile),
+            ...groups.map(_groupTile),
           ],
           if (peers.isNotEmpty) ...[
             Padding(
@@ -679,18 +715,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ],
       ),
-    );
-  }
-
-  Widget _peersList(ThemeData theme, ColorScheme colorScheme) {
-    final peers = _visiblePeers;
-    if (peers.isEmpty) {
-      return _emptyState(Icons.person_search, 'No peers found');
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.only(top: 4, bottom: 80),
-      itemCount: peers.length,
-      itemBuilder: (_, i) => _peerTile(peers[i], theme),
     );
   }
 
@@ -795,28 +819,39 @@ class _InviteDialog extends StatefulWidget {
 }
 
 class _InviteDialogState extends State<_InviteDialog> {
+  static const _minSearchLength = 3;
+
   List<Peer> _peers = [];
   final _searchCtrl = TextEditingController();
   bool _inviting = false;
+  bool _searching = false;
+  StreamSubscription<List<Peer>>? _peersSub;
 
   @override
   void initState() {
     super.initState();
     _peers = widget.service.getPeers();
-    widget.service.peersStream.listen((peers) {
-      if (mounted) setState(() => _peers = peers);
+    _peersSub = widget.service.peersStream.listen((peers) {
+      if (mounted && !_searching) setState(() => _peers = peers);
     });
   }
 
   @override
   void dispose() {
+    _peersSub?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   void _search(String q) {
+    final query = q.trim();
+    final searching = query.length >= _minSearchLength;
+    final peers = searching
+        ? widget.service.searchPeers(query)
+        : widget.service.peers;
     setState(() {
-      _peers = q.isEmpty ? widget.service.peers : widget.service.searchPeers(q);
+      _searching = searching;
+      _peers = peers;
     });
   }
 
@@ -851,7 +886,7 @@ class _InviteDialogState extends State<_InviteDialog> {
             TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
-                hintText: 'Search peers...',
+                hintText: 'Search peers (3+ characters)...',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(28),

@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/services.dart';
 
 class NotificationService {
-  static const _notificationIcon =
-      'com.example.huginn_messenger:drawable/ic_notification';
+  static const _notificationIcon = 'ic_notification';
+  static const _fallbackNotificationIcon = 'ic_launcher_background';
   static const _messagesChannel = AndroidNotificationChannel(
     'huginn_messages',
     'Messages',
@@ -14,6 +15,7 @@ class NotificationService {
   static FlutterLocalNotificationsPlugin? _androidPlugin;
   static bool _initialized = false;
   static bool _notificationsEnabled = true;
+  static String _activeNotificationIcon = _notificationIcon;
 
   static bool get notificationsEnabled => _notificationsEnabled;
 
@@ -33,18 +35,16 @@ class NotificationService {
     void Function(String chatId) onNotificationTap,
   ) async {
     _androidPlugin = FlutterLocalNotificationsPlugin();
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings(_notificationIcon),
-    );
-    await _androidPlugin!.initialize(
-      settings: settings,
-      onDidReceiveNotificationResponse: (response) {
-        final chatId = response.payload?.trim();
-        if (chatId != null && chatId.isNotEmpty) {
-          onNotificationTap(chatId);
-        }
-      },
-    );
+    try {
+      await _initializeAndroidPlugin(_notificationIcon, onNotificationTap);
+    } on PlatformException catch (error) {
+      if (error.code != 'invalid_icon') rethrow;
+      _activeNotificationIcon = _fallbackNotificationIcon;
+      await _initializeAndroidPlugin(
+        _fallbackNotificationIcon,
+        onNotificationTap,
+      );
+    }
 
     final android = _androidPlugin!
         .resolvePlatformSpecificImplementation<
@@ -76,6 +76,24 @@ class NotificationService {
     return null;
   }
 
+  static Future<void> _initializeAndroidPlugin(
+    String icon,
+    void Function(String chatId) onNotificationTap,
+  ) async {
+    final settings = InitializationSettings(
+      android: AndroidInitializationSettings(icon),
+    );
+    await _androidPlugin!.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (response) {
+        final chatId = response.payload?.trim();
+        if (chatId != null && chatId.isNotEmpty) {
+          onNotificationTap(chatId);
+        }
+      },
+    );
+  }
+
   static Future<void> showMessageNotification({
     required String chatId,
     required String peerName,
@@ -96,19 +114,19 @@ class NotificationService {
     if (_androidPlugin == null) {
       throw StateError('Android notifications are not initialized');
     }
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'huginn_messages',
       'Messages',
       channelDescription: 'New message notifications',
       importance: Importance.high,
       priority: Priority.high,
-      icon: _notificationIcon,
+      icon: _activeNotificationIcon,
     );
     await _androidPlugin!.show(
       id: chatId.hashCode,
       title: peerName,
       body: text,
-      notificationDetails: const NotificationDetails(android: androidDetails),
+      notificationDetails: NotificationDetails(android: androidDetails),
       payload: chatId,
     );
   }

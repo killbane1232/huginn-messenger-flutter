@@ -5,44 +5,66 @@ class NotificationService {
   static FlutterLocalNotificationsPlugin? _androidPlugin;
   static bool _initialized = false;
 
-  static Future<void> init() async {
-    if (_initialized) return;
+  static Future<String?> init({
+    required void Function(String chatId) onNotificationTap,
+  }) async {
+    if (_initialized) return null;
     _initialized = true;
 
     if (Platform.isAndroid) {
-      await _initAndroid();
+      return _initAndroid(onNotificationTap);
     }
+    return null;
   }
 
-  static Future<void> _initAndroid() async {
+  static Future<String?> _initAndroid(
+    void Function(String chatId) onNotificationTap,
+  ) async {
     _androidPlugin = FlutterLocalNotificationsPlugin();
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     );
-    await _androidPlugin!.initialize(settings: settings);
+    await _androidPlugin!.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (response) {
+        final chatId = response.payload?.trim();
+        if (chatId != null && chatId.isNotEmpty) {
+          onNotificationTap(chatId);
+        }
+      },
+    );
 
     final android = _androidPlugin!
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android != null) {
       await android.requestNotificationsPermission();
     }
+
+    final launchDetails = await _androidPlugin!
+        .getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp ?? false) {
+      final chatId = launchDetails?.notificationResponse?.payload?.trim();
+      if (chatId != null && chatId.isNotEmpty) return chatId;
+    }
+    return null;
   }
 
   static Future<void> showMessageNotification({
-    required String peerId,
+    required String chatId,
     required String peerName,
     required String text,
   }) async {
     if (Platform.isAndroid) {
-      await _showAndroid(peerId, peerName, text);
+      await _showAndroid(chatId, peerName, text);
     } else if (Platform.isLinux) {
       await _showLinux(peerName, text);
     }
   }
 
   static Future<void> _showAndroid(
-    String peerId,
+    String chatId,
     String peerName,
     String text,
   ) async {
@@ -56,11 +78,11 @@ class NotificationService {
       icon: '@drawable/ic_notification',
     );
     await _androidPlugin!.show(
-      id: peerId.hashCode,
+      id: chatId.hashCode,
       title: peerName,
       body: text,
       notificationDetails: const NotificationDetails(android: androidDetails),
-      payload: peerId,
+      payload: chatId,
     );
   }
 

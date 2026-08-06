@@ -42,9 +42,12 @@ class HuginnApp extends StatefulWidget {
 
 class _HuginnAppState extends State<HuginnApp> {
   final _service = MessengerService();
+  final _navigatorKey = GlobalKey<NavigatorState>();
   bool _loading = true;
   bool _needsLogin = false;
   String? _error;
+  String? _pendingNotificationChatId;
+  bool _notificationNavigationScheduled = false;
   StreamSubscription<AppEvent>? _eventSub;
   DateTime lastShown = DateTime.now();
 
@@ -65,7 +68,8 @@ class _HuginnAppState extends State<HuginnApp> {
   void _onAppEvent(AppEvent event) {
     if (event is MessageEvent) {
       final msg = event.message;
-      final peerName = _peerLoginForDisplay(_service.peers, msg.from);
+      final chatId = msg.chatId.trim().isNotEmpty ? msg.chatId : msg.from;
+      final peerName = _notificationChatName(chatId, msg.from);
       final text = msg.text.isNotEmpty
           ? msg.text
           : (msg.files.isNotEmpty ? '[File]' : '');
@@ -79,7 +83,7 @@ class _HuginnAppState extends State<HuginnApp> {
       if (isOwn) return;
       if (msg.timestamp.isAfter(lastShown)) {
         NotificationService.showMessageNotification(
-          peerId: msg.from,
+          chatId: chatId,
           peerName: peerName,
           text: text,
         );
@@ -88,11 +92,92 @@ class _HuginnAppState extends State<HuginnApp> {
     }
   }
 
+  String _notificationChatName(String chatId, String senderId) {
+    for (final group in _service.getGroups()) {
+      if (group.uid == chatId) return group.name;
+    }
+    return _peerLoginForDisplay(_service.peers, senderId);
+  }
+
+  void _handleNotificationTap(String chatId) {
+    final value = chatId.trim();
+    if (value.isEmpty) return;
+    _pendingNotificationChatId = value;
+    _scheduleNotificationNavigation();
+  }
+
+  void _scheduleNotificationNavigation() {
+    if (_loading ||
+        _error != null ||
+        _needsLogin ||
+        _pendingNotificationChatId == null ||
+        _notificationNavigationScheduled) {
+      return;
+    }
+    _notificationNavigationScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notificationNavigationScheduled = false;
+      if (!mounted) return;
+      final chatId = _pendingNotificationChatId;
+      final navigator = _navigatorKey.currentState;
+      if (chatId == null || navigator == null) return;
+
+      _pendingNotificationChatId = null;
+      _openNotificationChat(navigator, chatId);
+    });
+  }
+
+  void _openNotificationChat(NavigatorState navigator, String chatId) {
+    for (final group in _service.getGroups()) {
+      if (group.uid == chatId) {
+        navigator.push(
+          MaterialPageRoute(
+            settings: RouteSettings(name: 'chat:$chatId'),
+            builder: (_) => ChatScreen(
+              service: _service,
+              peerId: group.uid,
+              peerName: group.name,
+              isGroup: true,
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    Peer? matchingPeer;
+    for (final peer in _service.getPeers()) {
+      if (peer.key == chatId ||
+          peer.login == chatId ||
+          peer.displayLogin == chatId) {
+        matchingPeer = peer;
+        break;
+      }
+    }
+    navigator.push(
+      MaterialPageRoute(
+        settings: RouteSettings(name: 'chat:$chatId'),
+        builder: (_) => ChatScreen(
+          service: _service,
+          peerId: matchingPeer?.key ?? chatId,
+          peerName:
+              matchingPeer?.displayLogin ??
+              _peerLoginForDisplay(_service.peers, chatId),
+        ),
+      ),
+    );
+  }
+
   Future<void> _init() async {
     final ok = await _service.init();
     if (ok) {
       await PlatformService.init(_service);
-      await NotificationService.init();
+      final initialChatId = await NotificationService.init(
+        onNotificationTap: _handleNotificationTap,
+      );
+      if (initialChatId != null) {
+        _pendingNotificationChatId = initialChatId;
+      }
       _eventSub = _service.events.listen(_onAppEvent);
     }
     if (mounted) {
@@ -104,12 +189,14 @@ class _HuginnAppState extends State<HuginnApp> {
           _needsLogin = _needsLoginSetup(_service.currentUsername);
         }
       });
+      _scheduleNotificationNavigation();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Huginn Messenger',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -143,7 +230,10 @@ class _HuginnAppState extends State<HuginnApp> {
           ? FirstLoginScreen(
               service: _service,
               onComplete: () {
-                if (mounted) setState(() => _needsLogin = false);
+                if (mounted) {
+                  setState(() => _needsLogin = false);
+                  _scheduleNotificationNavigation();
+                }
               },
             )
           : HomeScreen(service: _service),

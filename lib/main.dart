@@ -1011,7 +1011,9 @@ class _ChatScreenState extends State<ChatScreen> {
       ok = widget.service.sendMessage(widget.peerId, text);
       if (ok) {
         _msgCtrl.clear();
-        setState(() => _replyingTo = null);
+        if (_replyingTo != null) {
+          setState(() => _replyingTo = null);
+        }
       }
       return;
     }

@@ -9,6 +9,7 @@ import '../models/config.dart';
 import '../models/app_event.dart';
 import '../models/group_chat.dart';
 import '../ffi/messenger_bridge.dart' as bridge;
+import 'event_poller.dart';
 
 const _uuid = Uuid();
 
@@ -135,13 +136,18 @@ class MessengerService {
   }
 
   void _startPolling() {
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _poll());
+    _pollTimer = Timer.periodic(eventPollInterval, (_) => _poll());
   }
 
   void _poll() {
     if (_handle <= 0) return;
-    final json = bridge.messengerGetEvent(_handle, 100);
-    if (json.isEmpty) return;
+    drainNativeEvents(
+      readEvent: (timeoutMs) => bridge.messengerGetEvent(_handle, timeoutMs),
+      onEvent: _handleEvent,
+    );
+  }
+
+  void _handleEvent(String json) {
     try {
       final data = jsonDecode(json) as Map<String, dynamic>;
       final type = data['type'] as String?;

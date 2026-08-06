@@ -209,14 +209,8 @@ class _HuginnAppState extends State<HuginnApp> {
   Future<void> _init() async {
     final ok = await _service.init();
     if (ok) {
-      final initialChatId = await NotificationService.init(
-        onNotificationTap: _handleNotificationTap,
-      );
-      await PlatformService.init(_service);
-      if (initialChatId != null) {
-        _pendingNotificationChatId = initialChatId;
-      }
       _eventSub = _service.events.listen(_onAppEvent);
+      unawaited(_initPlatformServices());
     }
     if (mounted) {
       setState(() {
@@ -228,7 +222,35 @@ class _HuginnAppState extends State<HuginnApp> {
         }
       });
       _scheduleNotificationNavigation();
+    }
+  }
+
+  Future<void> _initPlatformServices() async {
+    try {
+      final initialChatId = await NotificationService.init(
+        onNotificationTap: _handleNotificationTap,
+      ).timeout(const Duration(seconds: 8));
+      if (!mounted) return;
+      if (initialChatId != null) {
+        _pendingNotificationChatId = initialChatId;
+        _scheduleNotificationNavigation();
+      }
       _showNotificationPermissionWarning();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to initialize notifications: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(content: Text('Failed to initialize notifications.')),
+        );
+      }
+    }
+
+    try {
+      await PlatformService.init(_service).timeout(const Duration(seconds: 8));
+    } catch (error, stackTrace) {
+      debugPrint('Failed to initialize Android platform services: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 

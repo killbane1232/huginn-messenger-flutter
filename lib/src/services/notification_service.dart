@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
+  static const _notificationIcon =
+      'com.example.huginn_messenger:drawable/ic_notification';
   static const _messagesChannel = AndroidNotificationChannel(
     'huginn_messages',
     'Messages',
@@ -32,7 +34,7 @@ class NotificationService {
   ) async {
     _androidPlugin = FlutterLocalNotificationsPlugin();
     const settings = InitializationSettings(
-      android: AndroidInitializationSettings('ic_notification'),
+      android: AndroidInitializationSettings(_notificationIcon),
     );
     await _androidPlugin!.initialize(
       settings: settings,
@@ -100,7 +102,7 @@ class NotificationService {
       channelDescription: 'New message notifications',
       importance: Importance.high,
       priority: Priority.high,
-      icon: 'ic_notification',
+      icon: _notificationIcon,
     );
     await _androidPlugin!.show(
       id: chatId.hashCode,

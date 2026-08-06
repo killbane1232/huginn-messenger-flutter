@@ -43,6 +43,7 @@ class HuginnApp extends StatefulWidget {
 class _HuginnAppState extends State<HuginnApp> {
   final _service = MessengerService();
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   bool _loading = true;
   bool _needsLogin = false;
   String? _error;
@@ -84,11 +85,32 @@ class _HuginnAppState extends State<HuginnApp> {
       if (isOwn) return;
       if (!_markMessageForNotification(msg, chatId)) return;
       unawaited(
-        NotificationService.showMessageNotification(
+        _showMessageNotification(
           chatId: chatId,
           peerName: peerName,
           text: text,
         ),
+      );
+    }
+  }
+
+  Future<void> _showMessageNotification({
+    required String chatId,
+    required String peerName,
+    required String text,
+  }) async {
+    try {
+      await NotificationService.showMessageNotification(
+        chatId: chatId,
+        peerName: peerName,
+        text: text,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Failed to show message notification: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        const SnackBar(content: Text('Failed to show message notification.')),
       );
     }
   }
@@ -187,10 +209,10 @@ class _HuginnAppState extends State<HuginnApp> {
   Future<void> _init() async {
     final ok = await _service.init();
     if (ok) {
-      await PlatformService.init(_service);
       final initialChatId = await NotificationService.init(
         onNotificationTap: _handleNotificationTap,
       );
+      await PlatformService.init(_service);
       if (initialChatId != null) {
         _pendingNotificationChatId = initialChatId;
       }
@@ -206,13 +228,34 @@ class _HuginnAppState extends State<HuginnApp> {
         }
       });
       _scheduleNotificationNavigation();
+      _showNotificationPermissionWarning();
     }
+  }
+
+  void _showNotificationPermissionWarning() {
+    if (NotificationService.notificationsEnabled) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Message notifications are disabled in Android settings.',
+          ),
+          duration: const Duration(seconds: 12),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: PlatformService.openNotificationSettings,
+          ),
+        ),
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'Huginn Messenger',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

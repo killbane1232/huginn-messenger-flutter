@@ -2,8 +2,18 @@ import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
+  static const _messagesChannel = AndroidNotificationChannel(
+    'huginn_messages',
+    'Messages',
+    description: 'New message notifications',
+    importance: Importance.high,
+  );
+
   static FlutterLocalNotificationsPlugin? _androidPlugin;
   static bool _initialized = false;
+  static bool _notificationsEnabled = true;
+
+  static bool get notificationsEnabled => _notificationsEnabled;
 
   static Future<String?> init({
     required void Function(String chatId) onNotificationTap,
@@ -22,7 +32,7 @@ class NotificationService {
   ) async {
     _androidPlugin = FlutterLocalNotificationsPlugin();
     const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('ic_notification'),
     );
     await _androidPlugin!.initialize(
       settings: settings,
@@ -39,7 +49,20 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     if (android != null) {
-      await android.requestNotificationsPermission();
+      await android.createNotificationChannel(_messagesChannel);
+      var enabled = await android.areNotificationsEnabled() ?? false;
+      if (!enabled) {
+        enabled = await android.requestNotificationsPermission() ?? false;
+      }
+
+      final channels = await android.getNotificationChannels() ?? [];
+      final messageChannels = channels.where(
+        (channel) => channel.id == _messagesChannel.id,
+      );
+      final channelEnabled =
+          messageChannels.isEmpty ||
+          messageChannels.first.importance != Importance.none;
+      _notificationsEnabled = enabled && channelEnabled;
     }
 
     final launchDetails = await _androidPlugin!
@@ -68,14 +91,16 @@ class NotificationService {
     String peerName,
     String text,
   ) async {
-    if (_androidPlugin == null) return;
+    if (_androidPlugin == null) {
+      throw StateError('Android notifications are not initialized');
+    }
     const androidDetails = AndroidNotificationDetails(
       'huginn_messages',
       'Messages',
       channelDescription: 'New message notifications',
       importance: Importance.high,
       priority: Priority.high,
-      icon: '@drawable/ic_notification',
+      icon: 'ic_notification',
     );
     await _androidPlugin!.show(
       id: chatId.hashCode,

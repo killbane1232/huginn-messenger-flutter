@@ -74,6 +74,13 @@ class PlatformService {
     } catch (_) {}
   }
 
+  static Future<void> openNotificationSettings() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _platformChannel.invokeMethod('openNotificationSettings');
+    } catch (_) {}
+  }
+
   static Future<bool> openFile(String path) async {
     try {
       if (Platform.isAndroid) {

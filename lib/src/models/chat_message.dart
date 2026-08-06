@@ -125,10 +125,23 @@ class FormattedMessageText {
 class FileMeta {
   final String fileId;
   final String filename;
-  FileMeta({required this.fileId, this.filename = ''});
+  final String filePath;
+  FileMeta({required this.fileId, this.filename = '', this.filePath = ''});
 
   factory FileMeta.fromJson(Map<String, dynamic> json) => FileMeta(
     fileId: json['file_id'] as String? ?? '',
     filename: json['filename'] as String? ?? '',
+    filePath: json['file_path'] as String? ?? '',
   );
+
+  Map<String, dynamic> toJson() => {
+    'file_id': fileId,
+    'filename': filename,
+    if (filePath.isNotEmpty) 'file_path': filePath,
+  };
+
+  String? resolveLocalPath(Map<String, String> downloadedPaths) {
+    if (filePath.isNotEmpty) return filePath;
+    return downloadedPaths[fileId];
+  }
 }

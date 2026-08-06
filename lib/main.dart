@@ -1177,7 +1177,7 @@ class _ChatScreenState extends State<ChatScreen> {
       body: body,
     );
     final filePaths = message.files
-        .map((file) => widget.service.filePaths[file.fileId])
+        .map((file) => file.resolveLocalPath(widget.service.filePaths))
         .whereType<String>()
         .where((path) => File(path).existsSync())
         .toList();
@@ -1749,7 +1749,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       if (m.files.isNotEmpty)
                         ...m.files.map((f) {
                           final isImage = _isImageFile(f.filename);
-                          final filePath = widget.service.filePaths[f.fileId];
+                          final filePath = f.resolveLocalPath(
+                            widget.service.filePaths,
+                          );
                           if (isImage && filePath != null) {
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 4),

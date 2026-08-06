@@ -38,6 +38,17 @@ static GActionEntry app_actions[] = {
     {"quit", quit_action_cb, nullptr, nullptr, nullptr},
 };
 
+static gchar* get_app_icon_path() {
+  g_autofree gchar* executable_path =
+      g_file_read_link("/proc/self/exe", nullptr);
+  if (executable_path == nullptr) {
+    return nullptr;
+  }
+
+  g_autofree gchar* executable_dir = g_path_get_dirname(executable_path);
+  return g_build_filename(executable_dir, "data", "icon.png", nullptr);
+}
+
 static gboolean window_delete_event_cb(GtkWidget* widget, GdkEvent* event,
                                        gpointer user_data) {
   gtk_widget_hide(widget);
@@ -72,8 +83,10 @@ static void rebuild_tray_menu(MyApplication* self, GApplication* application) {
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  g_autofree gchar* icon_path = get_app_icon_path();
   AppIndicator* indicator = app_indicator_new(
-      "huginn-messenger", "indicator-messages",
+      "huginn-messenger",
+      icon_path != nullptr ? icon_path : "indicator-messages",
       APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
 #pragma GCC diagnostic pop
   app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ACTIVE);
@@ -97,6 +110,14 @@ static void my_application_activate(GApplication* application) {
 
   GtkWindow* window =
       GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
+
+  g_autofree gchar* icon_path = get_app_icon_path();
+  if (icon_path != nullptr) {
+    g_autoptr(GError) icon_error = nullptr;
+    if (!gtk_window_set_icon_from_file(window, icon_path, &icon_error)) {
+      g_warning("Failed to load application icon: %s", icon_error->message);
+    }
+  }
 
   g_signal_connect(window, "delete-event", G_CALLBACK(window_delete_event_cb),
                    nullptr);

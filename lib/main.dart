@@ -832,25 +832,134 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
+enum _MessageAction { reply, forward }
+
+class _ForwardTarget {
+  final String id;
+  final String name;
+  final bool isGroup;
+
+  const _ForwardTarget({
+    required this.id,
+    required this.name,
+    required this.isGroup,
+  });
+}
+
 class _ChatScreenState extends State<ChatScreen> {
-  static const _stickers = [
-    '(╯°益°)╯彡┻━┻',
-    '┬─┬ノ( º _ ºノ)',
-    '¯\\_(ツ)_/¯',
-    '(づ｡◕‿‿◕｡)づ',
-    '(ง •̀_•́)ง',
-    '(｡♥‿♥｡)',
-    '(⌐■_■)',
-    'ಠ_ಠ',
-    'ʕ•ᴥ•ʔ',
-    '(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧',
-    '(ಥ﹏ಥ)',
-    '٩(◕‿◕｡)۶',
-    '(＃`Д´)',
-    '◯０o。(ー。ー)y~~',
-  ];
+  static const _stickerCategories = <String, List<String>>{
+    'Радость': [
+      '(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧', '٩(◕‿◕｡)۶', 'ヽ(•‿•)ノ','(*^ω^) (´∀｀*)',
+      '(o^▽^o)', '(⌒▽⌒)☆', '<(￣︶￣)>', '(*⌒―⌒*)))', 'ヽ(・∀・)ﾉ', '(´｡• ω •｡`)', 
+      '(￣ω￣) ｀;:', ';｀;･(゜ε゜ )', '(o･ω･o)', '(＠＾－＾)', 'ヽ(*・ω・)ﾉ', '(o_ _)ﾉ彡☆', 
+      '(^人^)', '(o´▽`o)', '(*´▽`*)', '｡ﾟ( ﾟ^∀^ﾟ)ﾟ｡', '(´ω｀)', '(☆▽☆)', '(≧◡≦)', '(o´∀｀o)', 
+      '(´• ω •`)', '(＾▽＾)', '(⌒ω⌒)', '∑d(ﾟ∀ﾟd)', '╰(▔∀▔)╯', '(─‿‿─)', '(*^‿^*)', 
+      'ヽ(o^―^o)ﾉ', '(✯◡✯)', '(◕‿◕)', '(*≧ω≦*)', '(((o(*ﾟ▽ﾟ*)o)))', '(⌒‿⌒)', '＼(≧▽≦)／', 
+      '⌒(o＾▽＾o)ノ ☆', '～(`▽^人)', '(*ﾟ▽ﾟ*)', '(✧∀✧)', '(✧ω✧)', 'ヽ(*⌒▽⌒*)ﾉ', '(´｡• ᵕ •｡`)', 
+      '( ´ ▽ ` )', '(￣▽￣)', '╰(*´︶`*)╯', 'ヽ(>∀<☆)ノ', 'o(≧▽≦)o', '(☆ω☆)', '(っ˘ω˘ς )', 
+      '＼(￣▽￣)／', '(*¯︶¯*)', '＼(＾▽＾)／', '٩(◕‿◕)۶','(o˘◡˘o)'
+      ],
+    'Любовь': [
+      '(づ｡◕‿‿◕｡)づ', '(｡♥‿♥｡)', '(ﾉ´з｀)ノ', '(♡μ_μ)', '(*^^*)♡'
+      '(♡-_-♡)', '(￣ε￣＠)', 'ヽ(♡‿♡)ノ ( ´∀｀)ノ～ ♡',
+      '(─‿‿─)♡', '(´｡• ᵕ •｡`)♡', '(*♡∀♡)', '(｡・//ε//・｡)',
+      '(´ω｀♡)', '( ◡‿◡ ♡)', '(◕‿◕)♡', '(/▽＼*)｡o○♡',
+      '(ღ˘⌣˘ღ)', '(♡ﾟ▽ﾟ♡)', '♡(。-ω-)', '♡ ～(`▽^人)',
+      '(´• ω •`)', '♡', '(´ε｀ )♡', '(´｡• ω •｡`)', '♡', '( ´ ▽ ` ).｡ｏ♡',
+      '╰(*´︶`*)╯♡', '(*˘︶˘*).｡.:*♡', '(♡˙︶˙♡)', '♡＼(￣▽￣)／♡',
+      '(≧◡≦)', '♡', '(⌒▽⌒)♡', '(*¯ ³¯*)♡', '(っ˘з(˘⌣˘ )', '♡',
+      '♡ (˘▽˘>ԅ( ˘⌣˘)', '( ˘⌣˘)♡(˘⌣˘ )', '(/^-^(^ ^*)/', '♡'
+    ],
+    'Смущение': [
+      '(⌒_⌒;)', '(o^ ^o)', '(*/ω＼)', '(*/。＼)',
+      '(*/_＼)', '(*ﾉωﾉ)', '(o-_-o)', '(*μ_μ)',
+      '( ◡‿◡ *)', '(ᵔ.ᵔ)', '(*ﾉ∀`*)', '(//▽//)',
+      '(//ω//)', '(ノ*ﾟ▽ﾟ*)', '(*^.^*)', '(*ﾉ▽ﾉ)',
+      '(￣▽￣*)ゞ', '(⁄ ⁄•⁄ω⁄•⁄ ⁄)', '(*/▽＼*)'
+    ],
+    'Недовольство': [
+      '(＃＞＜)', '(；⌣̀_⌣́)', '☆ｏ(＞＜；)○', '(￣ ￣|||)',
+      '(；￣Д￣)', '(￣□￣」)', '(＃￣0￣)', '(＃￣ω￣)',
+      '(￢_￢;)', '(＞ｍ＜)', '(」゜ロ゜)」', '(〃＞＿＜;〃)',
+      '(＾＾＃)', '(︶︹︺)', '(￣ヘ￣)', '<(￣ ﹌ ￣)>',
+      '(￣︿￣)', '(＞﹏＜)', '(--_--)', '凸(￣ヘ￣)',
+      'ヾ( ￣O￣)ツ', '(⇀‸↼‶)', 'o(>< )o'
+    ],
+    'Злость': [
+      '(╯°益°)╯彡┻━┻', '(ง •̀_•́)ง', 'ಠ_ಠ', '(＃`Д´)', '(╬ಠ益ಠ)'
+      '(｀皿´＃)', '(｀ω´)', 'ヽ( `д´*)ノ',
+      '(・｀ω´・)', '(｀ー´)', 'ヽ(｀⌒´メ)ノ', '凸(｀△´＃)',
+      '(｀ε´)', 'ψ(｀∇´)ψ', 'ヾ(｀ヘ´)ﾉﾞ', 'ヽ(‵﹏′)ノ',
+      '(ﾒ｀ﾛ´)', '(╬｀益´)', '┌∩┐(◣_◢)┌∩┐', '凸(｀ﾛ´)凸',
+      'Σ(▼□▼メ)', '(°ㅂ°╬)', 'ψ(▼へ▼メ)～→', '(ノ°益°)ノ',
+      '(҂ `з´ )', '(‡▼益▼)', '(҂｀ﾛ´)凸 ((╬◣﹏◢))',
+      '٩(╬ʘ益ʘ╬)۶', '(╬ Ò﹏Ó)', '＼＼٩(๑`^´๑)۶／／'
+    ],
+    'Удивление': [
+      '(⊙_⊙)', '(°ロ°) !', 'Σ(°△°|||)', '(☉_☉)'
+      '(￣ω￣;)', 'σ(￣、￣〃)', '(￣～￣;)', '(-_-;)・・・',
+      '┐(`～`;)┌', '(・_・ヾ', '(〃￣ω￣〃ゞ', '┐(￣ヘ￣;)┌',
+      '(・_・;)', '(￣_￣)・・・', '╮(￣ω￣;)╭', '(￣.￣;)',
+      '(＠_＠)', '(・・;)ゞ', 'Σ(￣。￣ﾉ)', '(・・ )?',
+      '(•ิ_•ิ)?', '(◎ ◎)ゞ', '(ーー;)',
+      'w(ﾟｏﾟ)w ヽ(ﾟ〇ﾟ)ﾉ Σ(O_O) Σ(ﾟロﾟ)',
+      '(⊙_⊙)', '(o_O)', '(O_O;)', '(O.O)',
+      '(ﾟロﾟ)', '! (o_O) !', '(□_□)', 'Σ(□_□)',
+      '∑(O_O;)'
+    ],
+    'Сомнение': [
+      '(￢_￢)', '(→_→)', '(￢ ￢)', '(￢‿￢ )',
+      '(¬_¬ )', '(←_←)', '(¬ ¬ )', '(¬‿¬ )',
+      '(↼_↼)', '(⇀_⇀)'
+    ],
+    'Приветствие': [
+      '(*・ω・)ﾉ', '(￣▽￣)ノ', '(ﾟ▽ﾟ)/', '(*´∀｀)ﾉ',
+      '(^-^*)/', '(＠´ー`)ﾉﾞ', '(´• ω •`)ﾉ', '(ﾟ∀ﾟ)ﾉﾞ',
+      'ヾ(*`▽`*)', '＼(⌒▽⌒)', 'ヾ(☆▽☆)', '( ´ ▽ ` )ﾉ',
+      '(^０^)ノ', '~ヾ(・ω・)', '(・∀・)ノ', 'ヾ(^ω^*)',
+      '(*ﾟｰﾟ)ﾉ', '(・_・)ノ', '(o´ω`o)ﾉ', 'ヾ(☆\'∀\'☆)',
+      '(￣ω￣)/', '(´ω｀)ノﾞ', '(⌒ω⌒)ﾉ', '(o^ ^o)/',
+      '(≧▽≦)/', '(✧∀✧)/', '(o´▽`o)ﾉ', '(￣▽￣)/'
+    ],
+    'Грусть': [
+      '(ಥ﹏ಥ)', '(｡•́︿•̀｡)', '(╥_╥)', '(っ˘̩╭╮˘̩)っ'
+      '(ノ_<。)', '(*-_-)', '(´-ω-｀)', '.･ﾟﾟ･(／ω＼)･ﾟﾟ･.',
+      '(μ_μ)', '(ﾉД`)', '(-ω-、)', '。゜゜(´Ｏ｀)°゜。',
+      'o(TヘTo)', '(；ω；)', '(｡╯3╰｡)', '｡･ﾟﾟ*(>д<)*ﾟﾟ･｡',
+      '( ﾟ，_ゝ｀)', '(个_个)', '(╯︵╰,)', '｡･ﾟ(ﾟ><ﾟ)ﾟ･｡',
+      '( ╥ω╥ )', '(╯_╰)', '(╥_╥)', '.｡･ﾟﾟ･(＞_＜)･ﾟﾟ･｡.',
+      '(／ˍ・、)', '(ノ_<、)', '(╥﹏╥)', '｡ﾟ(｡ﾉωヽ｡)ﾟ｡',
+      '(つω`*)', '(｡T ω T｡)', '(ﾉω･､)', '･ﾟ･(｡>ω<｡)･ﾟ･',
+      '(T_T)', '(>_<)', '(Ｔ▽Ｔ)', '｡ﾟ･ (>﹏<) ･ﾟ｡',
+      'o(〒﹏〒)o'
+    ],
+    'Спокойствие': [
+      '┬─┬ノ( º _ ºノ)', '¯\\_(ツ)_/¯', '(⌐■_■)', 'ʕ•ᴥ•ʔ',
+      '◯０o。(ー。ー)y~~', 'ヽ(ー_ー )ノ', 'ヽ(´ー｀)┌', '┐(‘～` )┌', 'ヽ(　￣д￣)ノ',
+      '┐(￣ヘ￣)┌', 'ヽ(￣～￣　)ノ', '╮(￣_￣)╭', 'ヽ(ˇヘˇ)ノ',
+      '┐(￣～￣)┌', '┐(︶▽︶)┌', '╮(￣～￣)╭', '¯＼_(ツ)_/¯',
+      '┐(´д｀)┌', '╮(︶︿︶)╭', '┐(￣∀￣)┌', '┐( ˘ ､ ˘ )┌'
+    ],
+    'Секрет': [
+      '''ЗАПУСКАЕМ
+░ГУСЯ░▄▀▀▀▄░РАБОТЯГИ░░
+▄███▀░◐░░░▌░░░░░░░
+░░░░▌░░░░░▐░░░░░░░
+░░░░▐░░░░░▐░░░░░░░
+░░░░▌░░░░░▐▄▄░░░░░
+░░░░▌░░░░▄▀▒▒▀▀▀▀▄
+░░░▐░░░░▐▒▒▒▒▒▒▒▒▀▀▄
+░░░▐░░░░▐▄▒▒▒▒▒▒▒▒▒▒▀▄
+░░░░▀▄░░░░▀▄▒▒▒▒▒▒▒▒▒▒▀▄
+░░░░░░▀▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▀▄
+░░░░░░░░░░░▌▌░▌▌░░░░░
+░░░░░░░░░░░▌▌░▌▌░░░░░
+░░░░░░░░░▄▄▌▌▄▌▌░░░░░'''
+    ]
+  };
 
   final _msgCtrl = TextEditingController();
+  final _msgFocus = FocusNode();
   final _scrollCtrl = ScrollController();
   List<ChatMessage> _msgs = [];
   bool _loading = true;
@@ -860,6 +969,7 @@ class _ChatScreenState extends State<ChatScreen> {
   static const int _pageSize = 64;
   StreamSubscription<AppEvent>? _eventSub;
   final List<_AttachedFile> _attachedFiles = [];
+  ChatMessage? _replyingTo;
 
   @override
   void initState() {
@@ -872,6 +982,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _msgCtrl.dispose();
+    _msgFocus.dispose();
     _scrollCtrl.dispose();
     _eventSub?.cancel();
     super.dispose();
@@ -893,11 +1004,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final t = _msgCtrl.text.trim();
     if (t.isEmpty && _attachedFiles.isEmpty) return;
 
+    final text = _replyingTo == null ? t : _replyText(_replyingTo!, t);
+
     if (_attachedFiles.isEmpty) {
       bool ok;
-      ok = widget.service.sendMessage(widget.peerId, t);
+      ok = widget.service.sendMessage(widget.peerId, text);
       if (ok) {
         _msgCtrl.clear();
+        setState(() => _replyingTo = null);
       }
       return;
     }
@@ -906,7 +1020,7 @@ class _ChatScreenState extends State<ChatScreen> {
     for (var i = 0; i < _attachedFiles.length; i++) {
       final ok = widget.service.sendFile(
         widget.peerId,
-        t,
+        text,
         _attachedFiles[i].path,
       );
       if (ok) sent++;
@@ -922,19 +1036,256 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       if (sent > 0) {
         _msgCtrl.clear();
-        setState(() => _attachedFiles.clear());
+        setState(() {
+          _attachedFiles.clear();
+          _replyingTo = null;
+        });
       }
     }
   }
 
   bool _sendSticker(String sticker) {
-    final ok = widget.service.sendMessage(widget.peerId, sticker);
+    final text = _replyingTo == null
+        ? sticker
+        : _replyText(_replyingTo!, sticker);
+    final ok = widget.service.sendMessage(widget.peerId, text);
+    if (ok && _replyingTo != null) {
+      setState(() => _replyingTo = null);
+    }
     if (!ok && mounted) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Failed to send sticker')));
     }
     return ok;
+  }
+
+  String _messagePreview(ChatMessage message) {
+    final textPreview = FormattedMessageText.makePreview(message.text);
+    if (textPreview.isNotEmpty) return textPreview;
+    if (message.files.isEmpty) return '';
+    final filename = message.files.first.filename;
+    return filename.isEmpty ? '[File]' : '[File: $filename]';
+  }
+
+  String _replyText(ChatMessage message, String body) {
+    return FormattedMessageText.encodeReply(
+      author: _messageAuthorForFormatting(message),
+      preview: _messagePreview(message),
+      body: body,
+    );
+  }
+
+  String _messageAuthorForFormatting(ChatMessage message) {
+    final displayName = _peerNameForDisplay(message.from);
+    if (displayName != 'You') return displayName;
+    return widget.service.currentUsername ?? displayName;
+  }
+
+  void _startReply(ChatMessage message) {
+    setState(() => _replyingTo = message);
+    _msgFocus.requestFocus();
+  }
+
+  List<_ForwardTarget> _forwardTargets() {
+    final groups = widget.service.getGroups();
+    final refreshedPeers = widget.service.getPeers();
+    final peers = refreshedPeers.isEmpty
+        ? widget.service.peers
+        : refreshedPeers;
+    final groupIds = groups.map((group) => group.uid).toSet();
+    final targets = <_ForwardTarget>[
+      ...groups.map(
+        (group) =>
+            _ForwardTarget(id: group.uid, name: group.name, isGroup: true),
+      ),
+      ...peers
+          .where((peer) => !groupIds.contains(peer.displayLogin))
+          .map(
+            (peer) => _ForwardTarget(
+              id: peer.key,
+              name: peer.displayLogin,
+              isGroup: false,
+            ),
+          ),
+    ];
+    final seen = <String>{};
+    return targets.where((target) => seen.add(target.id)).toList();
+  }
+
+  Future<_ForwardTarget?> _chooseForwardTarget() {
+    final targets = _forwardTargets();
+    return showModalBottomSheet<_ForwardTarget>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Text(
+                  'Forward to',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+              ),
+              if (targets.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  child: Text('No conversations available'),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: targets.length,
+                    itemBuilder: (_, index) {
+                      final target = targets[index];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          child: Icon(
+                            target.isGroup ? Icons.group : Icons.person,
+                          ),
+                        ),
+                        title: Text(target.name),
+                        onTap: () => Navigator.pop(sheetContext, target),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _forwardMessage(ChatMessage message) async {
+    final target = await _chooseForwardTarget();
+    if (target == null || !mounted) return;
+
+    final parsed = FormattedMessageText.parse(message.text);
+    final body = parsed.body;
+    final author = parsed.forwardedFrom ?? _messageAuthorForFormatting(message);
+    final formattedText = FormattedMessageText.forward(
+      author: author,
+      body: body,
+    );
+    final filePaths = message.files
+        .map((file) => widget.service.filePaths[file.fileId])
+        .whereType<String>()
+        .where((path) => File(path).existsSync())
+        .toList();
+
+    var sent = false;
+    if (filePaths.isEmpty) {
+      if (body.isNotEmpty) {
+        sent = widget.service.sendMessage(target.id, formattedText);
+      }
+    } else {
+      for (var i = 0; i < filePaths.length; i++) {
+        final attachmentText = i == 0
+            ? formattedText
+            : FormattedMessageText.forward(
+                author: author,
+                body: '[Attachment]',
+              );
+        sent =
+            widget.service.sendFile(target.id, attachmentText, filePaths[i]) ||
+            sent;
+      }
+    }
+
+    if (!mounted) return;
+    final missingFiles = filePaths.length < message.files.length;
+    final text = sent
+        ? missingFiles
+              ? 'Message forwarded; unavailable attachments were skipped'
+              : 'Message forwarded'
+        : message.files.isNotEmpty
+        ? 'Attachment is not available for forwarding'
+        : 'Failed to forward message';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _showDesktopMessageMenu(
+    ChatMessage message,
+    TapDownDetails details,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final action = await showMenu<_MessageAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        details.globalPosition & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: const [
+        PopupMenuItem(
+          value: _MessageAction.reply,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.reply),
+            title: Text('Reply'),
+          ),
+        ),
+        PopupMenuItem(
+          value: _MessageAction.forward,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.forward),
+            title: Text('Forward'),
+          ),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case _MessageAction.reply:
+        _startReply(message);
+      case _MessageAction.forward:
+        await _forwardMessage(message);
+      case null:
+        break;
+    }
+  }
+
+  Widget _stickerGrid(BuildContext sheetContext, List<String> stickers) {
+    final colorScheme = Theme.of(sheetContext).colorScheme;
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 220,
+        mainAxisExtent: 72,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      itemCount: stickers.length,
+      itemBuilder: (_, index) {
+        final sticker = stickers[index];
+        return OutlinedButton(
+          onPressed: () {
+            if (_sendSticker(sticker)) {
+              Navigator.of(sheetContext).pop();
+            }
+          },
+          style: OutlinedButton.styleFrom(
+            foregroundColor: colorScheme.onSurface,
+            side: BorderSide(color: colorScheme.outlineVariant),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          child: Text(
+            sticker,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 18),
+          ),
+        );
+      },
+    );
   }
 
   void _showStickers() {
@@ -944,56 +1295,38 @@ class _ChatScreenState extends State<ChatScreen> {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (sheetContext) {
-        final colorScheme = Theme.of(sheetContext).colorScheme;
         return SafeArea(
           child: FractionallySizedBox(
             heightFactor: 0.55,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                  child: Text(
-                    'Stickers',
-                    style: Theme.of(sheetContext).textTheme.titleLarge,
+            child: DefaultTabController(
+              length: _stickerCategories.length,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Text(
+                      'Стикеры',
+                      style: Theme.of(sheetContext).textTheme.titleLarge,
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 220,
-                          mainAxisExtent: 72,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                        ),
-                    itemCount: _stickers.length,
-                    itemBuilder: (_, index) {
-                      final sticker = _stickers[index];
-                      return OutlinedButton(
-                        onPressed: () {
-                          if (_sendSticker(sticker)) {
-                            Navigator.of(sheetContext).pop();
-                          }
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colorScheme.onSurface,
-                          side: BorderSide(color: colorScheme.outlineVariant),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        child: Text(
-                          sticker,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 18),
-                        ),
-                      );
-                    },
+                  TabBar(
+                    isScrollable: true,
+                    tabs: _stickerCategories.keys
+                        .map((category) => Tab(text: category))
+                        .toList(),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: TabBarView(
+                      children: _stickerCategories.values
+                          .map(
+                            (stickers) => _stickerGrid(sheetContext, stickers),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -1037,8 +1370,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   String _formatTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
+    final localTime = dt.toLocal();
+    final h = localTime.hour.toString().padLeft(2, '0');
+    final m = localTime.minute.toString().padLeft(2, '0');
     return '$h:$m';
   }
 
@@ -1235,7 +1569,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       final idx = _loadingMore ? i - 1 : i;
                       final m = _msgs[idx];
                       final own = isMe(m.from);
-                      return _messageBubble(m, own, theme, colorScheme);
+                      return _interactiveMessage(m, own, theme, colorScheme);
                     },
                   ),
           ),
@@ -1273,6 +1607,7 @@ class _ChatScreenState extends State<ChatScreen> {
     ThemeData theme,
     ColorScheme colorScheme,
   ) {
+    final formatted = FormattedMessageText.parse(m.text);
     final borderRadius = BorderRadius.only(
       topLeft: const Radius.circular(18),
       topRight: const Radius.circular(18),
@@ -1324,6 +1659,91 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (formatted.reply case final reply?)
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 7),
+                          padding: const EdgeInsets.fromLTRB(9, 6, 9, 6),
+                          decoration: BoxDecoration(
+                            color: own
+                                ? colorScheme.onPrimary.withValues(alpha: 0.12)
+                                : colorScheme.primary.withValues(alpha: 0.09),
+                            border: Border(
+                              left: BorderSide(
+                                width: 3,
+                                color: own
+                                    ? colorScheme.onPrimary
+                                    : colorScheme.primary,
+                              ),
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _peerNameForDisplay(reply.author),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: own
+                                      ? colorScheme.onPrimary
+                                      : colorScheme.primary,
+                                ),
+                              ),
+                              Text(
+                                reply.preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: own
+                                      ? colorScheme.onPrimary.withValues(
+                                          alpha: 0.85,
+                                        )
+                                      : colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (formatted.forwardedFrom case final author?)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.forward,
+                                size: 14,
+                                color: own
+                                    ? colorScheme.onPrimary.withValues(
+                                        alpha: 0.85,
+                                      )
+                                    : colorScheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  'Forwarded from ${_peerNameForDisplay(author)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: own
+                                        ? colorScheme.onPrimary.withValues(
+                                            alpha: 0.85,
+                                          )
+                                        : colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (m.files.isNotEmpty)
                         ...m.files.map((f) {
                           final isImage = _isImageFile(f.filename);
@@ -1352,13 +1772,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           }
                           return _buildFileRow(f, own, colorScheme);
                         }),
-                      if (m.text.isNotEmpty)
+                      if (formatted.body.isNotEmpty)
                         Padding(
                           padding: EdgeInsets.only(
                             top: m.files.isNotEmpty ? 4 : 0,
                           ),
                           child: Text(
-                            m.text,
+                            formatted.body,
                             style: TextStyle(
                               color: own
                                   ? colorScheme.onPrimary
@@ -1386,6 +1806,50 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Widget _interactiveMessage(
+    ChatMessage message,
+    bool own,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
+    Widget child = _messageBubble(message, own, theme, colorScheme);
+
+    if (Platform.isAndroid) {
+      child = GestureDetector(
+        onLongPress: () => _forwardMessage(message),
+        child: Dismissible(
+          key: ValueKey(
+            message.msgId.isNotEmpty
+                ? message.msgId
+                : '${message.from}-${message.timestamp.microsecondsSinceEpoch}-${message.text.hashCode}',
+          ),
+          direction: DismissDirection.endToStart,
+          confirmDismiss: (_) async {
+            _startReply(message);
+            return false;
+          },
+          background: Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.only(right: 22),
+            alignment: Alignment.centerRight,
+            color: colorScheme.primaryContainer.withValues(alpha: 0.55),
+            child: Icon(Icons.reply, color: colorScheme.onPrimaryContainer),
+          ),
+          child: child,
+        ),
+      );
+    } else if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+      child = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onSecondaryTapDown: (details) =>
+            _showDesktopMessageMenu(message, details),
+        child: child,
+      );
+    }
+
+    return child;
   }
 
   Widget _attachedFilesBar(ColorScheme colorScheme) {
@@ -1429,55 +1893,111 @@ class _ChatScreenState extends State<ChatScreen> {
           top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
         ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            icon: const Icon(Icons.attach_file),
-            tooltip: 'Attach file',
-            onPressed: _pickFile,
-          ),
-          IconButton(
-            icon: const Icon(Icons.emoji_emotions_outlined),
-            tooltip: 'Stickers',
-            onPressed: _showStickers,
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: TextField(
-              controller: _msgCtrl,
-              maxLines: 5,
-              minLines: 1,
-              textInputAction: TextInputAction.send,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
+          if (_replyingTo case final message?)
+            Container(
+              margin: const EdgeInsets.fromLTRB(48, 0, 4, 8),
+              padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.65,
                 ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.5,
+                border: Border(
+                  left: BorderSide(color: colorScheme.primary, width: 3),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _peerNameForDisplay(message.from),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colorScheme.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          _messagePreview(message),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Cancel reply',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _replyingTo = null),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.attach_file),
+                tooltip: 'Attach file',
+                onPressed: _pickFile,
+              ),
+              IconButton(
+                icon: const Icon(Icons.emoji_emotions_outlined),
+                tooltip: 'Stickers',
+                onPressed: _showStickers,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: TextField(
+                  controller: _msgCtrl,
+                  focusNode: _msgFocus,
+                  maxLines: 5,
+                  minLines: 1,
+                  textInputAction: TextInputAction.send,
+                  decoration: InputDecoration(
+                    hintText: 'Type a message...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  onSubmitted: (_) => _send(),
                 ),
               ),
-              onSubmitted: (_) => _send(),
-            ),
-          ),
-          const SizedBox(width: 4),
-          FilledButton(
-            onPressed: _send,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(46, 46),
-              padding: const EdgeInsets.all(0),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
+              const SizedBox(width: 4),
+              FilledButton(
+                onPressed: _send,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(46, 46),
+                  padding: const EdgeInsets.all(0),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                ),
+                child: const Icon(Icons.send, size: 20),
               ),
-            ),
-            child: const Icon(Icons.send, size: 20),
+            ],
           ),
         ],
       ),

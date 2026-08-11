@@ -1,105 +1,142 @@
-# Huginn Messenger
+# Huginn Messenger — Flutter client
 
-Desktop P2P messenger using [Muninn](https://github.com/killbane1232/muninn) for peer discovery, with end-to-end encryption, WebRTC, and offline chunked delivery.
+Кроссплатформенный Flutter-клиент P2P-мессенджера Huginn. UI написан на Dart,
+а криптография, WebRTC, офлайн-доставка и SQLite реализованы в отдельном
+Go-submodule `src/huginn-messenger` и подключены через C ABI/Dart FFI.
 
-## Features
+Muninn используется для обнаружения endpoints, signaling и хранения метаданных
+зашифрованных чанков. Тексты сообщений и содержимое файлов передаются между
+Huginn-пирами.
 
-- **E2E Encryption** — AES-256-GCM with X25519 ECDH key exchange, Ed25519 signing
-- **WebRTC** — direct P2P data channel when both peers are online
-- **Offline delivery** — when recipient is offline, messages are split into chunks and distributed to quality-ranked peers
-- **Chunk verification** — recipient verifies hashes and reports to Muninn for quality scoring
-- **Peer discovery** — via Muninn phonebook server
-- **Real-time UI** — web interface with SSE updates
+## Возможности
 
-## Architecture
+- личные и групповые чаты;
+- E2E-шифрование и подписи;
+- прямая WebRTC-доставка и резервные offline chunks;
+- отправка, фоновая загрузка и открытие файлов;
+- ответы, пересылка и текстовые стикеры;
+- поиск пиров и групп от трёх символов;
+- relogin через текстовый ключ или QR-код;
+- Android/Linux notifications и переход в чат по notification tap;
+- настройка Muninn, chunk TTL и TURN.
 
+## Архитектура
+
+```mermaid
+flowchart LR
+    UI[Flutter Material UI]
+    Service[MessengerService]
+    FFI[Dart FFI]
+    Go[Huginn Go core]
+    DB[(SQLite)]
+    Muninn[Muninn<br/>REST + WebSocket]
+    Peers[Huginn peers<br/>WebRTC]
+
+    UI <--> Service
+    Service <--> FFI
+    FFI <--> Go
+    Go <--> DB
+    Go <--> Muninn
+    Go <--> Peers
 ```
-              ┌─────────────┐
-              │   Muninn    │  phonebook + chunk registry
-              │  :8080      │
-              └──────┬──────┘
-                     │ REST API
-        ┌────────────┼────────────┐
-        │            │            │
-   ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-   │  Alice  │  │   Bob   │  │Storage  │
-   │messenger│  │messenger│  │ Peers   │
-   └─────────┘  └─────────┘  └─────────┘
-        │            │
-        └────P2P─────┘  HTTP / WebRTC
-```
 
-## Usage
+Подробности:
 
-### 1. Start Muninn server (modified version with chunk recipient tracking)
+- [архитектура Flutter-приложения](docs/flutter-application.md);
+- [архитектура Go-ядра](src/huginn-messenger/docs/architecture.md);
+- [README Go-submodule](src/huginn-messenger/README.md).
+
+## Поддерживаемые сборки
+
+| Платформа | Состояние |
+|---|---|
+| Android | Release-сборка четырёх ABI через `build.sh` |
+| Linux | Go shared library собирается и упаковывается через CMake |
+| iOS / macOS | Flutter runner есть, но native framework не входит в `build.sh` |
+| Windows | Flutter runner есть, но native DLL не входит в `build.sh` |
+
+## Подготовка
 
 ```bash
-cd /path/to/muninn
-go run ./cmd/server
+git submodule update --init --recursive
+/usr/local/flutter/bin/flutter pub get
 ```
 
-### 2. Build & run the messenger
+Для работы требуются Flutter, Go, а для Android также Android SDK и NDK.
+Версии Dart/Flutter packages задаются в `pubspec.yaml`, Go modules — в
+`src/huginn-messenger/go.mod`.
+
+## Проверка
 
 ```bash
-cd huginn-messenger
-go build -o huginn-messenger .
+/usr/local/flutter/bin/flutter analyze
+/usr/local/flutter/bin/flutter test
 
-# Terminal 1 — Alice
-./huginn-messenger --username alice --muninn http://localhost:8080
-
-# Terminal 2 — Bob
-./huginn-messenger --username bob --muninn http://localhost:8080
+cd src/huginn-messenger
+GOCACHE=/tmp/huginmunin-messenger-go-cache /usr/local/go/bin/go test ./...
 ```
 
-### 3. Open the web UI
+## Release-сборка Android и Linux
 
-Each instance prints a URL like `http://localhost:XXXXX`. Open it in your browser.
-
-### Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--username` | (required) | Your username |
-| `--muninn` | `http://localhost:8080` | Muninn server address |
-| `--ui-port` | random | Web UI port |
-| `--msg-port` | random | P2P message port |
-
-## How it works
-
-### Online messaging
-1. Both peers register with Muninn (Ed25519 signing key + X25519 encryption key)
-2. Messages are encrypted with AES-256-GCM (ECDH-derived key), signed with Ed25519
-3. Sent via direct HTTP POST or WebRTC data channel
-4. Recipient decrypts and verifies the signature
-
-### Offline messaging
-1. Sender detects recipient is offline (HTTP connection refused)
-2. Message is split into 1KB chunks
-3. Each chunk is encrypted + signed individually
-4. Top-N best peers (by quality score) are selected from Muninn
-5. Each chunk is stored on a different best peer
-6. Chunk hashes are registered in Muninn with `recipient_id`
-
-### Message discovery (coming online)
-1. Recipient queries Muninn: `GET /api/v1/recipient/{id}/chunks`
-2. Muninn returns list of `(file_id, chunk_index, hash, peer_id)`
-3. Recipient fetches chunks from storage peers
-4. Verifies hashes, decrypts, reconstructs message
-5. Reports each chunk to Muninn for quality scoring
-6. Verified chunks are deleted from storage peers
-
-## Project structure
-
+```bash
+./build.sh
 ```
-main.go                        — entry point
-internal/
-  config/config.go             — command-line flags
-  crypto/crypto.go             — AES-256-GCM, X25519 ECDH, Ed25519 sign/verify
-  chunk/chunk.go               — message chunking, encryption, reassembly
-  webrtc/webrtc.go             — WebRTC peer connection manager (Pion)
-  muninn/client.go             — Muninn REST API client
-  p2p/p2p.go                   — P2P transport (HTTP) + chunk storage
-  messenger/messenger.go       — core logic (send/receive/offline/collect)
-  ui/server.go                 — web UI server + SSE
-  ui/static/                   — embedded HTML/CSS/JS
+
+Скрипт:
+
+1. собирает host `libhuginn_messenger.so`;
+2. cross-compile Go library для `arm64-v8a`, `armeabi-v7a`, `x86_64` и `x86`;
+3. копирует Android libraries в `android/app/src/main/jniLibs`;
+4. собирает release APK;
+5. собирает Linux release bundle.
+
+Результаты:
+
+- `build/app/outputs/flutter-apk/app-release.apk`;
+- `build/linux/x64/release/bundle/`.
+
+Собранные `.so`, Flutter `build/`, `.dart_tool/`, `.gradle/` и platform
+`ephemeral/` не должны редактироваться вручную или попадать в коммиты.
+
+## Структура проекта
+
+```text
+lib/main.dart                         Material UI and navigation
+lib/src/models/                       Dart models
+lib/src/services/messenger_service.dart
+lib/src/services/event_poller.dart
+lib/src/services/notification_service.dart
+lib/src/services/platform_service.dart
+lib/src/ffi/messenger_bridge.dart     manual Dart FFI wrapper
+src/huginn-messenger/bridge.go        exported C ABI
+src/huginn-messenger/internal/        Go messenger core
+android/                              Android runner and Kotlin channels
+linux/                                Linux runner and Go CMake integration
+test/                                 Flutter tests
+docs/                                 Flutter documentation
 ```
+
+## Конфигурация
+
+По умолчанию клиент использует:
+
+- Muninn: `https://muninn.evil-bread.ru`;
+- chunk TTL: `1w`;
+- SQLite: `huginn.db`;
+- TURN: выключен до задания адреса.
+
+На Android/iOS база размещается в application documents directory, на desktop
+относительный путь разрешается от рабочей директории.
+
+## Разработка FFI
+
+Источником истины C ABI являются экспортированные функции в
+`src/huginn-messenger/bridge.go`. Изменение ABI нужно синхронно провести через:
+
+1. Go exports;
+2. C header;
+3. `lib/src/ffi/messenger_bridge.dart`;
+4. при необходимости generated bindings;
+5. сборку shared library и целевой Flutter-платформы.
+
+`flutter analyze` не проверяет runtime ABI и сетевое поведение Go-ядра.

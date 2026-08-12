@@ -1,3 +1,4 @@
 [submodule "src/huginn-messenger"]
 	path = src/huginn-messenger
 	url = https://github.com/killbane1232/huginn-messenger.git
+	branch = main

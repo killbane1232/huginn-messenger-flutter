@@ -58,9 +58,12 @@ flowchart LR
 ## Подготовка
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --remote --checkout
 /usr/local/flutter/bin/flutter pub get
 ```
+
+Подмодуль настроен на ветку `main`; та же команда автоматически выполняется
+в `build.sh` и GitHub Actions перед сборкой и тестами Flutter-приложения.
 
 Для работы требуются Flutter, Go, а для Android также Android SDK и NDK.
 Версии Dart/Flutter packages задаются в `pubspec.yaml`, Go modules — в

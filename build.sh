@@ -9,6 +9,9 @@ echo "Using: $(go version)"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 GO_SRC="$ROOT/src/huginn-messenger"
 
+echo "=== Updating Go submodule from main ==="
+git -C "$ROOT" submodule update --init --recursive --remote --checkout
+
 echo "=== 1. Building Go shared library (host) ==="
 cd "$GO_SRC"
 go build -ldflags='-checklinkname=0' -buildmode=c-shared -o libhuginn_messenger.so .

@@ -371,7 +371,7 @@ Android-уведомления используют канал `huginn_messages`
 
 ```bash
 cd /home/killbane/git/huginmunin/huginn_messenger
-git submodule update --init --recursive
+git submodule update --init --recursive --remote --checkout
 /usr/local/flutter/bin/flutter pub get
 /usr/local/flutter/bin/flutter analyze
 /usr/local/flutter/bin/flutter test

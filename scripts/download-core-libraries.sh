@@ -2,16 +2,33 @@
 set -eu
 
 root_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-version_file=${HUGINN_CORE_VERSION_FILE:-$root_dir/core-library.version}
-version=${HUGINN_CORE_VERSION:-$(tr -d '[:space:]' < "$version_file")}
 repository=${HUGINN_CORE_REPOSITORY:-killbane1232/huginn-messenger}
+module=${HUGINN_CORE_MODULE:-github.com/$repository}
 release_base=${HUGINN_CORE_RELEASE_BASE:-https://github.com/$repository/releases}
+goproxy=${GOPROXY:-https://proxy.golang.org,direct}
+version=${HUGINN_CORE_VERSION:-}
 host_arch=${HUGINN_CORE_ARCH:-}
 
 if [ -z "$version" ]; then
-    echo "Huginn core version is empty" >&2
+    if command -v go >/dev/null 2>&1; then
+        go_bin=go
+    elif [ -x /usr/local/go/bin/go ]; then
+        go_bin=/usr/local/go/bin/go
+    else
+        echo "Go is required to resolve the latest Huginn core version" >&2
+        exit 1
+    fi
+
+    version=$(GOPROXY="$goproxy" "$go_bin" list -m -f '{{.Version}}' "$module@latest")
+fi
+
+if ! printf '%s\n' "$version" | grep -Eq \
+    '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+    echo "Invalid Huginn core version: $version" >&2
     exit 1
 fi
+
+echo "Downloading Huginn core $version"
 
 if [ -z "$host_arch" ]; then
     case "$(uname -m)" in

@@ -62,13 +62,15 @@ flowchart LR
 /usr/local/flutter/bin/flutter pub get
 ```
 
-Версия native-ядра закреплена в `core-library.version`. `build.sh` и GitHub
-Actions загружают готовые Linux/Android артефакты из GitHub Release и проверяют
-их по `SHA256SUMS`.
+`build.sh` и GitHub Actions автоматически определяют последнюю версию
+native-ядра через Go module proxy, загружают готовые Linux/Android артефакты из
+соответствующего GitHub Release и проверяют их по `SHA256SUMS`. Для явного выбора
+версии можно задать, например, `HUGINN_CORE_VERSION=v0.1.1`; адрес Go proxy
+настраивается стандартной переменной `GOPROXY`.
 
 Для работы требуются Flutter, `curl`, Android SDK для Android-сборки и Linux
-desktop dependencies для Linux. Go и Android NDK нужны только репозиторию ядра,
-который публикует библиотеки.
+desktop dependencies для Linux. Go нужен для определения последней версии ядра.
+Android NDK нужен только репозиторию ядра, который публикует библиотеки.
 
 ## Проверка
 
@@ -85,7 +87,7 @@ desktop dependencies для Linux. Go и Android NDK нужны только р�
 
 Скрипт:
 
-1. загружает и проверяет Linux и Android libraries закреплённой версии;
+1. определяет последнюю версию Go-ядра, загружает и проверяет её Linux и Android libraries;
 2. размещает Android libraries в `android/app/src/main/jniLibs`;
 3. собирает release APK;
 4. упаковывает Linux library в release bundle.
@@ -108,7 +110,6 @@ lib/src/services/event_poller.dart
 lib/src/services/notification_service.dart
 lib/src/services/platform_service.dart
 lib/src/ffi/messenger_bridge.dart     manual Dart FFI wrapper
-core-library.version                  pinned native core release
 scripts/download-core-libraries.sh    verified library downloader
 native/linux/                         downloaded Linux library (ignored)
 android/                              Android runner and Kotlin channels
@@ -139,7 +140,6 @@ docs/                                 Flutter documentation
 2. C header;
 3. `lib/src/ffi/messenger_bridge.dart`;
 4. при необходимости generated bindings;
-5. выпуск новой версии shared library, обновление `core-library.version` и
-   сборку целевой Flutter-платформы.
+5. выпуск новой версии shared library и сборку целевой Flutter-платформы.
 
 `flutter analyze` не проверяет runtime ABI и сетевое поведение Go-ядра.

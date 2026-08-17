@@ -21,6 +21,6 @@ flutter build linux --release
 
 echo ""
 echo "=== Done! ==="
-echo "Core version: $(tr -d '[:space:]' < core-library.version)"
+echo "Core version: latest available release (resolved during download)"
 echo "Android APK: build/app/outputs/flutter-apk/app-release.apk"
 echo "Linux bundle: build/linux/x64/release/bundle/"

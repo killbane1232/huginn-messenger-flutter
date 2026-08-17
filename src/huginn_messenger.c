@@ -2,8 +2,8 @@
 
 // This file is part of the Flutter FFI plugin that wraps the Go shared library.
 //
-// Build the Go library:
-//   go build -buildmode=c-shared -o libhuginn_messenger.so
+// Download the pinned native library:
+//   scripts/download-core-libraries.sh
 //
 // The Go compiler auto-generates a matching header. This file provides
 // the platform-specific Flutter plugin side. On most platforms, the

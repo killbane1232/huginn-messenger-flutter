@@ -2,8 +2,8 @@
 
 Этот документ описывает актуальный Flutter-клиент из каталога
 `huginn_messenger`. Сетевой протокол, криптография, WebRTC и SQLite находятся
-не в Dart-коде, а в Go-ядре `src/huginn-messenger`, подключённом через C ABI и
-Dart FFI.
+не в Dart-коде, а в отдельно выпускаемом Go-ядре, подключённом как
+предсобранная versioned-библиотека через C ABI и Dart FFI.
 
 Документ составлен по состоянию кода на 11 августа 2026 года. Раздел
 [Сверка с существующими схемами](#сверка-с-существующими-схемами) фиксирует
@@ -78,8 +78,8 @@ flowchart TB
 | `lib/src/services/` | Фасад Go-ядра, поток событий, уведомления и платформенная интеграция |
 | `lib/src/models/` | Dart-представления конфигурации, пиров, групп, сообщений и событий |
 | `lib/src/ffi/messenger_bridge.dart` | Ручная загрузка динамической библиотеки и вызовы экспортированного C ABI |
-| `src/huginn-messenger/bridge.go` | Таблица native-инстансов, JSON-контракт с Dart и очередь событий |
-| `src/huginn-messenger/internal/` | Криптография, доставка, WebRTC, Muninn-клиент и SQLite-хранилище |
+| upstream `bridge.go` | Таблица native-инстансов, JSON-контракт с Dart и очередь событий |
+| upstream `internal/` | Криптография, доставка, WebRTC, Muninn-клиент и SQLite-хранилище |
 | platform runners | Упаковка native-библиотеки и функции конкретной ОС |
 
 Ключевые правила границы Flutter/Go:
@@ -105,11 +105,13 @@ huginn_messenger/
 │       └── services/                      # messenger, events, platform, notifications
 ├── test/                                  # Flutter unit/widget tests
 ├── android/                               # Android runner, Kotlin channels и jniLibs
-├── linux/                                 # Linux runner и CMake-сборка Go-библиотеки
+├── linux/                                 # Linux runner и упаковка готовой библиотеки
 ├── ios/ macos/ windows/                   # runners без полной сборки в build.sh
-├── src/huginn-messenger/                  # отдельный Git submodule с Go-ядром
+├── native/linux/                          # загруженная Linux library, ignored
+├── scripts/download-core-libraries.sh     # verified release downloader
+├── core-library.version                   # закреплённая версия Go-ядра
 ├── pubspec.yaml
-└── build.sh                               # release-сборка Go + Android + Linux
+└── build.sh                               # загрузка core + Android + Linux
 ```
 
 `lib/main.dart` пока содержит большую часть экранов в одном файле. При
@@ -333,7 +335,7 @@ Relogin заменяет ключи целевой идентичности. QR-
 | Платформа | Текущее состояние |
 |---|---|
 | Android | Есть сборка четырёх ABI, foreground service, уведомления, QR-сканер, downloads и `FileProvider` |
-| Linux | Есть CMake-сборка Go shared library, `notify-send` и `xdg-open`; входит в `build.sh` |
+| Linux | CMake упаковывает предсобранную shared library, доступны `notify-send` и `xdg-open`; входит в `build.sh` |
 | iOS / macOS | Dart умеет загрузить framework, но `build.sh` не собирает и не упаковывает его |
 | Windows | Dart умеет загрузить DLL, но `build.sh` не собирает и не упаковывает её |
 
@@ -366,18 +368,17 @@ Android-уведомления используют канал `huginn_messages`
 
 ## Сборка и проверка
 
-Работать нужно из Git-репозитория `huginn_messenger`, а команды Go выполнять в
-отдельном submodule.
+Работать нужно из Git-репозитория `huginn_messenger`. Исходники Go-ядра для
+обычной сборки клиента не требуются.
 
 ```bash
 cd /home/killbane/git/huginmunin/huginn_messenger
-git submodule update --init --recursive --remote --checkout
 /usr/local/flutter/bin/flutter pub get
 /usr/local/flutter/bin/flutter analyze
 /usr/local/flutter/bin/flutter test
 ```
 
-Полная release-сборка Android и Linux, включая Go shared libraries:
+Полная release-сборка Android и Linux с загрузкой проверенных shared libraries:
 
 ```bash
 cd /home/killbane/git/huginmunin/huginn_messenger
@@ -389,31 +390,32 @@ cd /home/killbane/git/huginmunin/huginn_messenger
 - Android APK: `build/app/outputs/flutter-apk/app-release.apk`;
 - Linux bundle: `build/linux/x64/release/bundle/`.
 
-Для изменения Go-ядра:
+Go-ядро развивается и тестируется в отдельном репозитории:
 
 ```bash
-cd /home/killbane/git/huginmunin/huginn_messenger/src/huginn-messenger
+git clone https://github.com/killbane1232/huginn-messenger.git
+cd huginn-messenger
 GOCACHE=/tmp/huginmunin-messenger-go-cache /usr/local/go/bin/go test ./...
-/usr/local/go/bin/go build -ldflags='-checklinkname=0' \
-  -buildmode=c-shared -o /tmp/libhuginn_messenger.so .
+make package-library
 ```
 
 Сборка только Flutter-кода не подтверждает совместимость C ABI. После изменения
-границы Dart/Go нужна как минимум сборка shared library и целевой платформы.
+границы Dart/Go нужен новый release ядра, обновление `core-library.version` и
+сборка целевой платформы.
 
 ## Сверка с существующими схемами
 
-Проверены и синхронизированы внешний [README](../README.md), README
-[Go-submodule](../src/huginn-messenger/README.md), подробная
-[architecture.md](../src/huginn-messenger/docs/architecture.md) и README
-[Muninn](../../muninn/README.md).
+Проверены и синхронизированы внешний [README](../README.md), upstream
+[Go core README](https://github.com/killbane1232/huginn-messenger), подробная
+[architecture.md](https://github.com/killbane1232/huginn-messenger/blob/main/docs/architecture.md)
+и README [Muninn](../../muninn/README.md).
 
 | Документ | Область ответственности |
 |---|---|
 | `huginn_messenger/README.md` | Обзор Flutter-репозитория, сборка и ссылки на подробные документы |
 | `docs/flutter-application.md` | Flutter UI, FFI, platform services и пользовательские сценарии |
-| `src/huginn-messenger/README.md` | Запуск и использование standalone Go-приложения |
-| `src/huginn-messenger/docs/architecture.md` | Доставка, WebRTC, chunks, группы, relogin, web UI и C ABI |
+| upstream `README.md` | Запуск и использование standalone Go-приложения |
+| upstream `docs/architecture.md` | Доставка, WebRTC, chunks, группы, relogin, web UI и C ABI |
 | `muninn/README.md` | Directory API, signaling, chunk metadata и stores Muninn |
 
 Критические границы теперь описаны одинаково:
@@ -434,10 +436,11 @@ GOCACHE=/tmp/huginmunin-messenger-go-cache /usr/local/go/bin/go test ./...
 
 - Flutter-поток и UX: `lib/main.dart`.
 - Dart/native контракт: `lib/src/ffi/messenger_bridge.dart` и
-  `src/huginn-messenger/bridge.go`.
-- Доставка и фоновые циклы: `src/huginn-messenger/internal/messenger/`.
-- Signal transport: `src/huginn-messenger/internal/muninn/rtc.go`.
+  upstream `bridge.go`.
+- Доставка и фоновые циклы: upstream `internal/messenger/`.
+- Signal transport: upstream `internal/muninn/rtc.go`.
 - Muninn routes: [`muninn/internal/api/server.go`](../../muninn/internal/api/server.go)
   в соседнем Git-репозитории.
 - Платформенные возможности: Android manifest/Kotlin и Linux CMake runner.
-- Версии зависимостей: `pubspec.yaml` и `go.mod`, а не примеры в README.
+- Версии зависимостей: `pubspec.yaml` и `core-library.version`, а не примеры в
+  README.

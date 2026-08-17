@@ -75,10 +75,22 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# Build Go shared library and bundle it (must come after generated_plugins.cmake
-# because it sets PLUGIN_BUNDLED_LIBRARIES to empty).
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src/huginn-messenger" "${CMAKE_CURRENT_BINARY_DIR}/go")
-list(APPEND PLUGIN_BUNDLED_LIBRARIES $<TARGET_FILE:huginn_messenger_go>)
+# Bundle the prebuilt Huginn core library (must come after
+# generated_plugins.cmake because it sets PLUGIN_BUNDLED_LIBRARIES to empty).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+  set(HUGINN_CORE_ARCH "amd64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  set(HUGINN_CORE_ARCH "arm64")
+else()
+  message(FATAL_ERROR "Unsupported Huginn core architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(HUGINN_CORE_LIBRARY
+  "${CMAKE_CURRENT_SOURCE_DIR}/../native/linux/${HUGINN_CORE_ARCH}/libhuginn_messenger.so")
+if(NOT EXISTS "${HUGINN_CORE_LIBRARY}")
+  message(FATAL_ERROR
+    "Prebuilt Huginn core is missing. Run scripts/download-core-libraries.sh first.")
+endif()
+list(APPEND PLUGIN_BUNDLED_LIBRARIES "${HUGINN_CORE_LIBRARY}")
 
 
 # === Installation ===

@@ -109,7 +109,6 @@ huginn_messenger/
 ├── ios/ macos/ windows/                   # runners без полной сборки в build.sh
 ├── native/linux/                          # загруженная Linux library, ignored
 ├── scripts/download-core-libraries.sh     # verified release downloader
-├── core-library.version                   # закреплённая версия Go-ядра
 ├── pubspec.yaml
 └── build.sh                               # загрузка core + Android + Linux
 ```
@@ -400,8 +399,9 @@ make package-library
 ```
 
 Сборка только Flutter-кода не подтверждает совместимость C ABI. После изменения
-границы Dart/Go нужен новый release ядра, обновление `core-library.version` и
-сборка целевой платформы.
+границы Dart/Go нужен новый release ядра и сборка целевой платформы. Downloader
+автоматически выбирает последний release, доступный через Go module proxy;
+`HUGINN_CORE_VERSION` позволяет явно выбрать версию при необходимости.
 
 ## Сверка с существующими схемами
 
@@ -442,5 +442,5 @@ make package-library
 - Muninn routes: [`muninn/internal/api/server.go`](../../muninn/internal/api/server.go)
   в соседнем Git-репозитории.
 - Платформенные возможности: Android manifest/Kotlin и Linux CMake runner.
-- Версии зависимостей: `pubspec.yaml` и `core-library.version`, а не примеры в
-  README.
+- Версии Flutter-зависимостей: `pubspec.yaml`; версия Go-ядра по умолчанию
+  определяется через Go module proxy.

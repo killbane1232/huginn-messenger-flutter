@@ -2,7 +2,7 @@
 
 // This file is part of the Flutter FFI plugin that wraps the Go shared library.
 //
-// Download the pinned native library:
+// Download the latest released native library:
 //   scripts/download-core-libraries.sh
 //
 // The Go compiler auto-generates a matching header. This file provides

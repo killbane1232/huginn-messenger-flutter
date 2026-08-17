@@ -19,6 +19,11 @@ jobs:
           channel: stable
           flutter-version: '3.x'
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
       - name: Install Linux deps
         run: |
           sudo apt-get update -qq

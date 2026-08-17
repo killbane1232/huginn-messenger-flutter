@@ -153,3 +153,5 @@ app.*.symbols
 !/dev/ci/**/Gemfile.lock
 **/*.so
 **/test_dir/*
+/native/
+/src/huginn-messenger/

@@ -1430,33 +1430,45 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_replyingTo != null) {
           setState(() => _replyingTo = null);
         }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              widget.service.lastSendError ?? 'Failed to queue message',
+            ),
+          ),
+        );
       }
       return;
     }
 
-    var sent = 0;
+    final queuedFiles = <_AttachedFile>[];
+    String? sendError;
     for (var i = 0; i < _attachedFiles.length; i++) {
       final ok = widget.service.sendFile(
         widget.peerId,
         text,
         _attachedFiles[i].path,
       );
-      if (ok) sent++;
+      if (ok) {
+        queuedFiles.add(_attachedFiles[i]);
+      } else {
+        sendError ??= widget.service.lastSendError;
+      }
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            sent > 0 ? '$sent file(s) sent' : 'Failed to send files',
-          ),
+          content: Text(sendError ?? '${queuedFiles.length} file(s) queued'),
         ),
       );
-      if (sent > 0) {
-        _msgCtrl.clear();
+      if (queuedFiles.isNotEmpty) {
+        final allQueued = queuedFiles.length == _attachedFiles.length;
+        if (allQueued) _msgCtrl.clear();
         setState(() {
-          _attachedFiles.clear();
-          _replyingTo = null;
+          _attachedFiles.removeWhere(queuedFiles.contains);
+          if (allQueued) _replyingTo = null;
         });
       }
     }
@@ -2628,15 +2640,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _save() {
     final username = _uCtrl.text.trim();
-    final oldUsername = widget.service.config.username;
-    if (username != oldUsername) {
-      widget.service.setUsername(username).then((ok) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
-        }
-      });
+    if (!AppConfig.isValidMuninnAddr(_mCtrl.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a valid http(s) Muninn server URL'),
+        ),
+      );
       return;
     }
     final ok = widget.service.saveConfig(

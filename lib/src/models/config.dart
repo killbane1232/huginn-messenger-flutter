@@ -9,7 +9,7 @@ class AppConfig {
 
   AppConfig({
     this.username = '',
-    this.muninnAddr = 'https://muninn.evil-bread.ru',
+    this.muninnAddr = '',
     this.chunkTtl = '1w',
     this.dbPath = 'huginn.db',
     this.turnAddr = '',
@@ -19,13 +19,22 @@ class AppConfig {
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
     username: json['username'] as String? ?? '',
-    muninnAddr: json['muninn'] as String? ?? 'https://muninn.evil-bread.ru',
+    muninnAddr: json['muninn'] as String? ?? '',
     chunkTtl: json['chunk_ttl'] as String? ?? '1w',
     dbPath: json['db_path'] as String? ?? 'huginn.db',
     turnAddr: json['turn_addr'] as String? ?? '',
     turnUser: json['turn_user'] as String? ?? '',
     turnPass: json['turn_pass'] as String? ?? '',
   );
+
+  static bool isValidMuninnAddr(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty &&
+        !uri.hasQuery &&
+        !uri.hasFragment;
+  }
 
   Map<String, dynamic> toJson() => {
     'username': username,

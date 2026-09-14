@@ -75,7 +75,7 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# Bundle the prebuilt Huginn core library (must come after
+# Bundle the locally compiled Huginn core library (must come after
 # generated_plugins.cmake because it sets PLUGIN_BUNDLED_LIBRARIES to empty).
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
   set(HUGINN_CORE_ARCH "amd64")
@@ -88,7 +88,7 @@ set(HUGINN_CORE_LIBRARY
   "${CMAKE_CURRENT_SOURCE_DIR}/../native/linux/${HUGINN_CORE_ARCH}/libhuginn_messenger.so")
 if(NOT EXISTS "${HUGINN_CORE_LIBRARY}")
   message(FATAL_ERROR
-    "Prebuilt Huginn core is missing. Run scripts/download-core-libraries.sh first.")
+    "Huginn core is missing. Run scripts/build-core-libraries.sh linux first.")
 endif()
 list(APPEND PLUGIN_BUNDLED_LIBRARIES "${HUGINN_CORE_LIBRARY}")
 

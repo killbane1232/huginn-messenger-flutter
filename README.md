@@ -2,8 +2,8 @@
 
 Кроссплатформенный Flutter-клиент P2P-мессенджера Huginn. UI написан на Dart,
 а криптография, WebRTC, офлайн-доставка и SQLite реализованы в отдельном
-Go-ядре. Клиент получает его как предсобранную versioned-библиотеку и подключает
-через C ABI/Dart FFI.
+Go-ядре. Клиент собирает его из submodule `src/huginn-messenger`, обновляя
+исходники до последнего коммита `main`, и подключает через C ABI/Dart FFI.
 
 Muninn используется для обнаружения endpoints, signaling и хранения метаданных
 зашифрованных чанков. Тексты сообщений и содержимое файлов передаются между
@@ -20,6 +20,13 @@ Huginn-пирами.
 - relogin через текстовый ключ или QR-код;
 - Android/Linux notifications и переход в чат по notification tap;
 - настройка Muninn, chunk TTL и TURN.
+
+Успешная отправка с обновлённым ядром означает сохранение сообщения и
+зашифрованных вложений в SQLite для фоновой доставки. Очередь переживает
+перезапуск. При ошибке подготовки клиент показывает причину и сохраняет текст
+и непринятые вложения в редакторе; уже принятые вложения повторно не отправляются.
+Исправления очереди должны присутствовать в `main` ядра; библиотека
+пересобирается вместе с клиентом.
 
 ## Архитектура
 
@@ -51,8 +58,8 @@ flowchart LR
 
 | Платформа | Состояние |
 |---|---|
-| Android | Предсобранные библиотеки четырёх ABI загружаются через `build.sh` |
-| Linux | Предсобранная библиотека упаковывается через CMake |
+| Android | Библиотеки четырёх ABI собираются из submodule через `build.sh` |
+| Linux | Библиотека собирается из submodule и упаковывается через CMake |
 | iOS / macOS | Flutter runner есть, но native framework не входит в `build.sh` |
 | Windows | Flutter runner есть, но native DLL не входит в `build.sh` |
 
@@ -62,15 +69,28 @@ flowchart LR
 /usr/local/flutter/bin/flutter pub get
 ```
 
-`build.sh` и GitHub Actions автоматически определяют последнюю версию
-native-ядра через Go module proxy, загружают готовые Linux/Android артефакты из
-соответствующего GitHub Release и проверяют их по `SHA256SUMS`. Для явного выбора
-версии можно задать, например, `HUGINN_CORE_VERSION=v0.1.1`; адрес Go proxy
-настраивается стандартной переменной `GOPROXY`.
+`build.sh` и GitHub Actions вызывают `scripts/build-core-libraries.sh`, который
+обновляет submodule командой `git submodule update --init --recursive --remote
+--checkout -- src/huginn-messenger` и компилирует shared libraries. В
+`.gitmodules` задано `branch = main`. Git всё равно хранит SHA подмодуля, но
+перед каждой сборкой скрипт получает последний `main`; использованный SHA
+выводится в лог. При ошибке обновления или незакоммиченных изменениях ядра
+сборка останавливается. Для обновления нужен доступ к Git remote.
 
-Для работы требуются Flutter, `curl`, Android SDK для Android-сборки и Linux
-desktop dependencies для Linux. Go нужен для определения последней версии ядра.
-Android NDK нужен только репозиторию ядра, который публикует библиотеки.
+Сборочный скрипт запускается на Linux. Нужны Git, Go, C-компилятор, Flutter,
+Android SDK/NDK для Android и Linux desktop dependencies для Linux.
+Путь к NDK можно задать через `ANDROID_NDK_HOME` или `ANDROID_NDK_ROOT`;
+иначе выбирается последняя установленная версия из `$ANDROID_HOME/ndk`
+(`ANDROID_SDK_ROOT` или `~/Android/Sdk` используются как запасные пути).
+CI устанавливает NDK `28.2.13676358`.
+
+Отдельная сборка библиотек перед прямым вызовом `flutter build`:
+
+```bash
+scripts/build-core-libraries.sh linux    # только Linux
+scripts/build-core-libraries.sh android  # только Android, четыре ABI
+scripts/build-core-libraries.sh          # Linux и Android
+```
 
 ## Проверка
 
@@ -78,6 +98,18 @@ Android NDK нужен только репозиторию ядра, котор�
 /usr/local/flutter/bin/flutter analyze
 /usr/local/flutter/bin/flutter test
 ```
+
+Нативный тест ошибок отправки, сохранения очереди и настройки Muninn запускается
+с пересобранной Linux-библиотекой:
+
+```bash
+scripts/build-core-libraries.sh linux
+HUGINN_NATIVE_TESTS=1 LD_LIBRARY_PATH="$PWD/native/linux/amd64" \
+  /usr/local/flutter/bin/flutter test
+```
+
+На Linux ARM64 используйте `native/linux/arm64`. Проверка обновления submodule
+и сборочного скрипта без доступа к сети: `python3 scripts/test_build_core.py`.
 
 ## Release-сборка Android и Linux
 
@@ -87,7 +119,7 @@ Android NDK нужен только репозиторию ядра, котор�
 
 Скрипт:
 
-1. определяет последнюю версию Go-ядра, загружает и проверяет её Linux и Android libraries;
+1. обновляет Go-submodule до последнего `main` и собирает Linux и Android libraries;
 2. размещает Android libraries в `android/app/src/main/jniLibs`;
 3. собирает release APK;
 4. упаковывает Linux library в release bundle.
@@ -110,19 +142,29 @@ lib/src/services/event_poller.dart
 lib/src/services/notification_service.dart
 lib/src/services/platform_service.dart
 lib/src/ffi/messenger_bridge.dart     manual Dart FFI wrapper
-scripts/download-core-libraries.sh    verified library downloader
-native/linux/                         downloaded Linux library (ignored)
+src/huginn-messenger/                 Go core submodule (main)
+scripts/build-core-libraries.sh       submodule update and native build
+native/linux/                         compiled Linux library (ignored)
 android/                              Android runner and Kotlin channels
-linux/                                Linux runner and prebuilt CMake integration
+linux/                                Linux runner and CMake library packaging
 test/                                 Flutter tests
 docs/                                 Flutter documentation
 ```
 
 ## Конфигурация
 
-По умолчанию клиент использует:
+Начальный адрес Muninn задаётся ключом `muninn` в `assets/config.json`,
+который включается в сборку. Измените этот файл перед сборкой для своего
+сервера. При следующих запусках используется адрес, сохранённый в SQLite.
+Поле **Settings → Muninn server** сохраняет новый адрес и сразу пересоздаёт
+подключение; одновременно можно изменить login.
 
-- Muninn: `https://muninn.evil-bread.ru`;
+Для этой загрузки конфигурации нужна обновлённая shared library ядра: пустой
+адрес в `messenger_create` загружает SQLite и возвращает `-4`, если адрес
+ещё не задан. Изменения ядра должны быть в `main` перед сборкой клиентов.
+
+Остальные значения по умолчанию:
+
 - chunk TTL: `1w`;
 - SQLite: `huginn.db`;
 - TURN: выключен до задания адреса.
@@ -140,6 +182,6 @@ docs/                                 Flutter documentation
 2. C header;
 3. `lib/src/ffi/messenger_bridge.dart`;
 4. при необходимости generated bindings;
-5. выпуск новой версии shared library и сборку целевой Flutter-платформы.
+5. обновление `main` ядра, пересборку shared library и целевой Flutter-платформы.
 
 `flutter analyze` не проверяет runtime ABI и сетевое поведение Go-ядра.

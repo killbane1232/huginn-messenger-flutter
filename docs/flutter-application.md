@@ -2,8 +2,9 @@
 
 Этот документ описывает актуальный Flutter-клиент из каталога
 `huginn_messenger`. Сетевой протокол, криптография, WebRTC и SQLite находятся
-не в Dart-коде, а в отдельно выпускаемом Go-ядре, подключённом как
-предсобранная versioned-библиотека через C ABI и Dart FFI.
+не в Dart-коде, а в Go-ядре из submodule `src/huginn-messenger`. При сборке
+исходники обновляются до последнего `main`, компилируются в shared library
+и подключаются через C ABI и Dart FFI.
 
 Документ составлен по состоянию кода на 11 августа 2026 года. Раздел
 [Сверка с существующими схемами](#сверка-с-существующими-схемами) фиксирует
@@ -107,10 +108,11 @@ huginn_messenger/
 ├── android/                               # Android runner, Kotlin channels и jniLibs
 ├── linux/                                 # Linux runner и упаковка готовой библиотеки
 ├── ios/ macos/ windows/                   # runners без полной сборки в build.sh
-├── native/linux/                          # загруженная Linux library, ignored
-├── scripts/download-core-libraries.sh     # verified release downloader
+├── src/huginn-messenger/                  # Go core submodule, branch = main
+├── native/linux/                          # собранная Linux library, ignored
+├── scripts/build-core-libraries.sh        # обновление main и сборка ядра
 ├── pubspec.yaml
-└── build.sh                               # загрузка core + Android + Linux
+└── build.sh                               # сборка core + Android + Linux
 ```
 
 `lib/main.dart` пока содержит большую часть экранов в одном файле. При
@@ -226,10 +228,9 @@ Android считать QR-код relogin. После смены login или у�
 - адрес и учётные данные TURN;
 - relogin-ключ.
 
-Изменение login сразу пересоздаёт native-инстанс. Простое сохранение Muninn,
-TTL или TURN записывает конфигурацию, но не перестраивает уже созданные сетевые
-клиенты. Для гарантированного применения этих параметров нужен перезапуск или
-явное пересоздание `MessengerService`.
+Сохранение login, Muninn или TURN пересоздаёт native-инстанс и применяет
+все изменённые поля вместе. TTL применяется при сохранении конфигурации.
+Muninn должен быть URL с `http://` или `https://` без query и fragment.
 
 ## Поток событий Go → Flutter
 
@@ -334,7 +335,7 @@ Relogin заменяет ключи целевой идентичности. QR-
 | Платформа | Текущее состояние |
 |---|---|
 | Android | Есть сборка четырёх ABI, foreground service, уведомления, QR-сканер, downloads и `FileProvider` |
-| Linux | CMake упаковывает предсобранную shared library, доступны `notify-send` и `xdg-open`; входит в `build.sh` |
+| Linux | CMake упаковывает shared library, собранную из submodule; доступны `notify-send` и `xdg-open`; входит в `build.sh` |
 | iOS / macOS | Dart умеет загрузить framework, но `build.sh` не собирает и не упаковывает его |
 | Windows | Dart умеет загрузить DLL, но `build.sh` не собирает и не упаковывает её |
 
@@ -352,7 +353,7 @@ Android-уведомления используют канал `huginn_messages`
 
 | Параметр | Значение |
 |---|---|
-| Muninn | `https://muninn.evil-bread.ru` |
+| Muninn | ключ `muninn` в `assets/config.json` при первом запуске; затем SQLite |
 | Chunk TTL | `1w` |
 | Database | `huginn.db` |
 | TURN | выключен, пока адрес пуст |
@@ -367,8 +368,10 @@ Android-уведомления используют канал `huginn_messages`
 
 ## Сборка и проверка
 
-Работать нужно из Git-репозитория `huginn_messenger`. Исходники Go-ядра для
-обычной сборки клиента не требуются.
+Работать нужно из Git-репозитория `huginn_messenger`. Скрипт автоматически
+инициализирует submodule и обновляет его до последнего `main` командой
+`git submodule update --init --recursive --remote --checkout`. Одного
+`git clone --recurse-submodules` недостаточно: он использует сохранённый SHA.
 
 ```bash
 cd /home/killbane/git/huginmunin/huginn_messenger
@@ -377,7 +380,7 @@ cd /home/killbane/git/huginmunin/huginn_messenger
 /usr/local/flutter/bin/flutter test
 ```
 
-Полная release-сборка Android и Linux с загрузкой проверенных shared libraries:
+Полная release-сборка Android и Linux с компиляцией shared libraries:
 
 ```bash
 cd /home/killbane/git/huginmunin/huginn_messenger
@@ -389,19 +392,26 @@ cd /home/killbane/git/huginmunin/huginn_messenger
 - Android APK: `build/app/outputs/flutter-apk/app-release.apk`;
 - Linux bundle: `build/linux/x64/release/bundle/`.
 
-Go-ядро развивается и тестируется в отдельном репозитории:
+Для сборки ядра нужны Go и C-компилятор, для Android — SDK и NDK.
+Путь к NDK задаётся через `ANDROID_NDK_HOME`/`ANDROID_NDK_ROOT` или определяется
+по последней установленной версии в SDK. Скрипт рассчитан на Linux.
+Можно собрать только библиотеки: `scripts/build-core-libraries.sh linux`
+или `scripts/build-core-libraries.sh android`, затем вызвать `flutter build`.
+Каждый запуск скрипта обновляет `main` и выводит фактический SHA в лог.
+Незакоммиченные изменения ядра и ошибки Git останавливают сборку.
+
+Go-ядро развивается в отдельном репозитории, доступном как submodule:
 
 ```bash
-git clone https://github.com/killbane1232/huginn-messenger.git
-cd huginn-messenger
+git submodule update --init --recursive --remote --checkout -- src/huginn-messenger
+cd src/huginn-messenger
 GOCACHE=/tmp/huginmunin-messenger-go-cache /usr/local/go/bin/go test ./...
 make package-library
 ```
 
 Сборка только Flutter-кода не подтверждает совместимость C ABI. После изменения
-границы Dart/Go нужен новый release ядра и сборка целевой платформы. Downloader
-автоматически выбирает последний release, доступный через Go module proxy;
-`HUGINN_CORE_VERSION` позволяет явно выбрать версию при необходимости.
+границы Dart/Go изменения должны попасть в `main` ядра; затем нужны пересборка
+shared library и сборка целевой платформы. Релизные артефакты ядра не скачиваются.
 
 ## Сверка с существующими схемами
 
@@ -442,5 +452,5 @@ make package-library
 - Muninn routes: [`muninn/internal/api/server.go`](../../muninn/internal/api/server.go)
   в соседнем Git-репозитории.
 - Платформенные возможности: Android manifest/Kotlin и Linux CMake runner.
-- Версии Flutter-зависимостей: `pubspec.yaml`; версия Go-ядра по умолчанию
-  определяется через Go module proxy.
+- Версии Flutter-зависимостей: `pubspec.yaml`; версия Go-ядра — последний
+  `main` submodule на момент запуска сборки, SHA указан в её логе.

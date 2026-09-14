@@ -1,13 +1,13 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 export PATH="/usr/local/flutter/bin:$PATH"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== 1. Downloading prebuilt Huginn core libraries ==="
+echo "=== 1. Building Huginn core libraries from latest main ==="
 cd "$ROOT"
-scripts/download-core-libraries.sh
+scripts/build-core-libraries.sh
 
 echo ""
 echo "=== 2. Building Flutter Android APK ==="
@@ -21,6 +21,6 @@ flutter build linux --release
 
 echo ""
 echo "=== Done! ==="
-echo "Core version: latest available release (resolved during download)"
+echo "Core commit: $(git -C "$ROOT/src/huginn-messenger" rev-parse HEAD)"
 echo "Android APK: build/app/outputs/flutter-apk/app-release.apk"
 echo "Linux bundle: build/linux/x64/release/bundle/"

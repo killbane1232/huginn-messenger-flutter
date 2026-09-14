@@ -154,4 +154,3 @@ app.*.symbols
 **/*.so
 **/test_dir/*
 /native/
-/src/huginn-messenger/

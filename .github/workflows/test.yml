@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test core submodule build workflow
+        run: python3 scripts/test_build_core.py
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

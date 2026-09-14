@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: subosito/flutter-action@v2
         with:
@@ -23,6 +25,11 @@ jobs:
         with:
           go-version: stable
           cache: false
+
+      - name: Install Android NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Install Linux deps
         run: |
@@ -76,8 +83,8 @@ jobs:
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/huginn-release.jks"
 
-      - name: Download prebuilt Huginn core libraries
-        run: scripts/download-core-libraries.sh
+      - name: Build Huginn core libraries from latest main
+        run: scripts/build-core-libraries.sh
 
       - name: Build Flutter APK
         env:

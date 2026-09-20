@@ -41,6 +41,15 @@ class ChatMessage {
     'timestamp': timestamp.toIso8601String(),
     'msg_id': msgId,
   };
+
+  String get preview {
+    final body = FormattedMessageText.parse(text).body.trim();
+    final textPreview = FormattedMessageText.makePreview(body);
+    if (textPreview.isNotEmpty) return textPreview;
+    if (files.isEmpty) return '';
+    final filename = files.first.filename;
+    return filename.isEmpty ? '[File]' : '[File: $filename]';
+  }
 }
 
 class MessageReplyQuote {

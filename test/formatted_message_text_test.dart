@@ -34,4 +34,28 @@ void main() {
     expect(parsed.forwardedFrom, 'Bob');
     expect(parsed.body, 'Forwarded body');
   });
+
+  test('message preview handles whitespace, Unicode and unnamed files', () {
+    ChatMessage message(String text, {List<FileMeta> files = const []}) =>
+        ChatMessage(
+          from: 'Alice',
+          text: text,
+          timestamp: DateTime.utc(2026),
+          files: files,
+        );
+
+    expect(message('\n  Hello   world\nNext line').preview, 'Hello world');
+    expect(message('😀' * 60).preview, '${'😀' * 49}…');
+    expect(message('', files: [FileMeta(fileId: 'file')]).preview, '[File]');
+    expect(
+      message('Caption', files: [FileMeta(fileId: 'file')]).preview,
+      'Caption',
+    );
+    expect(
+      message(
+        FormattedMessageText.forward(author: 'Bob', body: 'Forwarded body'),
+      ).preview,
+      'Forwarded body',
+    );
+  });
 }

@@ -503,6 +503,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Peer> _peers = [];
   List<GroupChat> _groups = [];
+  final Map<String, ChatMessage> _lastMessages = {};
+  final Set<String> _loadedMessagePreviews = {};
   final _searchCtrl = TextEditingController();
   bool _searching = false;
   StreamSubscription<List<Peer>>? _peersSub;
@@ -510,9 +512,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Peer> get _visiblePeers {
     final groupIds = _groups.map((group) => group.uid).toSet();
-    return _peers
+    final peers = _peers
         .where((peer) => !groupIds.contains(peer.displayLogin))
         .toList();
+    peers.sort((a, b) {
+      final aMessage = _lastMessages[a.key];
+      final bMessage = _lastMessages[b.key];
+      if (aMessage != null && bMessage != null) {
+        final byTime = bMessage.timestamp.compareTo(aMessage.timestamp);
+        if (byTime != 0) return byTime;
+      } else if (aMessage != null) {
+        return -1;
+      } else if (bMessage != null) {
+        return 1;
+      }
+      final byName = a.displayLogin.toLowerCase().compareTo(
+        b.displayLogin.toLowerCase(),
+      );
+      return byName != 0 ? byName : a.key.compareTo(b.key);
+    });
+    return peers;
   }
 
   List<GroupChat> get _visibleGroups {
@@ -529,10 +548,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _peersSub = widget.service.peersStream.listen((peers) {
-      if (mounted && !_searching) setState(() => _peers = peers);
+      if (!mounted || _searching) return;
+      setState(() => _peers = peers);
+      unawaited(_loadMessagePreviews());
     });
     _eventSub = widget.service.events.listen((event) {
-      if (event is MessageEvent) _loadGroups();
+      if (!mounted || event is! MessageEvent) return;
+      _loadGroups();
+      final message = event.message;
+      if (message.chatId.isEmpty) {
+        // Older cores omit the chat ID, including for outgoing/group messages.
+        // Read each chat's history instead of guessing from the sender.
+        unawaited(_loadMessagePreviews(refresh: true));
+      } else {
+        _rememberLastMessage(message.chatId, message);
+      }
     });
     _loadGroups();
     _loadPeers();
@@ -546,6 +576,34 @@ class _HomeScreenState extends State<HomeScreen> {
   void _loadPeers() {
     final peers = widget.service.getPeers();
     if (mounted) setState(() => _peers = peers);
+    unawaited(_loadMessagePreviews());
+  }
+
+  Future<void> _loadMessagePreviews({bool refresh = false}) async {
+    final peerIds = {
+      ..._visiblePeers.map((peer) => peer.key),
+      if (refresh) ..._loadedMessagePreviews,
+    };
+    for (final peerId in peerIds) {
+      if (!_loadedMessagePreviews.add(peerId) && !refresh) continue;
+      final messages = await widget.service.getMessagesPaginated(
+        peerId,
+        limit: 1,
+      );
+      if (!mounted) return;
+      if (messages.isNotEmpty) {
+        _rememberLastMessage(peerId, messages.last);
+      }
+    }
+  }
+
+  void _rememberLastMessage(String chatId, ChatMessage message) {
+    final previous = _lastMessages[chatId];
+    // Delayed delivery or a history read must not replace a newer live event.
+    if (previous != null && message.timestamp.isBefore(previous.timestamp)) {
+      return;
+    }
+    setState(() => _lastMessages[chatId] = message);
   }
 
   @override
@@ -563,6 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _searching = false;
         _peers = widget.service.peers;
       });
+      unawaited(_loadMessagePreviews());
       return;
     }
 
@@ -571,6 +630,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _searching = true;
       _peers = peers;
     });
+    unawaited(_loadMessagePreviews());
   }
 
   Future<void> _createGroup() async {
@@ -619,6 +679,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refresh() async {
     _loadGroups();
     widget.service.refreshPeers();
+    await _loadMessagePreviews(refresh: true);
   }
 
   @override
@@ -810,7 +871,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _peerTile(Peer p, ThemeData theme) {
+    final lastMessage = _lastMessages[p.key];
     return ListTile(
+      key: ValueKey(p.key),
       leading: Stack(
         children: [
           CircleAvatar(
@@ -845,6 +908,11 @@ class _HomeScreenState extends State<HomeScreen> {
       title: Text(
         p.displayLogin,
         style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        lastMessage?.preview ?? 'No messages yet',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
       trailing: p.online
           ? Container(
@@ -1491,11 +1559,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   String _messagePreview(ChatMessage message) {
-    final textPreview = FormattedMessageText.makePreview(message.text);
-    if (textPreview.isNotEmpty) return textPreview;
-    if (message.files.isEmpty) return '';
-    final filename = message.files.first.filename;
-    return filename.isEmpty ? '[File]' : '[File: $filename]';
+    return message.preview;
   }
 
   String _replyText(ChatMessage message, String body) {

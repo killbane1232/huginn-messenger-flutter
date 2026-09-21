@@ -75,6 +75,11 @@ void main() {
       final dbPath = '${directory.path}/huginn.db';
       expect(await service.init(username: 'alice', dbPath: dbPath), isTrue);
       expect(service.config.muninnAddr, firstAddress);
+      expect(await service.getFileDownloads(), isEmpty);
+      await expectLater(
+        service.cancelFileDownload('unknown-file'),
+        throwsStateError,
+      );
       await firstEvents.moveNext().timeout(const Duration(seconds: 10));
       expect(firstEvents.current, 'alice');
 

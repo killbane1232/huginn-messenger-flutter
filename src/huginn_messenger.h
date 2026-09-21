@@ -20,11 +20,13 @@ FFI_PLUGIN_EXPORT char* messenger_get_messages(long handle, const char* peer_id)
 FFI_PLUGIN_EXPORT char* messenger_get_config(long handle);
 FFI_PLUGIN_EXPORT char* messenger_get_downloads_dir(long handle);
 FFI_PLUGIN_EXPORT char* messenger_get_file_path(long handle, const char* file_id);
+FFI_PLUGIN_EXPORT char* messenger_get_file_downloads(long handle);
 
 // Actions (return JSON: {"status":"ok"} or {"error":"..."})
 FFI_PLUGIN_EXPORT char* messenger_send_message(long handle, const char* to, const char* text, int ttl);
 FFI_PLUGIN_EXPORT char* messenger_send_file(long handle, const char* to, const char* text, const char* file_path, int ttl);
 FFI_PLUGIN_EXPORT char* messenger_save_config(long handle, const char* json_config);
+FFI_PLUGIN_EXPORT char* messenger_cancel_file_download(long handle, const char* file_id);
 
 // Events (polling, returns JSON event or empty string if none)
 FFI_PLUGIN_EXPORT char* messenger_get_event(long handle, int timeout_ms);

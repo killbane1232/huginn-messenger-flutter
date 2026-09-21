@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'huginn_messenger.dart';
 import 'src/services/platform_service.dart';
 import 'src/services/notification_service.dart';
+import 'src/widgets/downloads_screen.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -692,6 +693,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Huginn Messenger'),
         centerTitle: true,
         actions: [
+          DownloadsButton(service: widget.service),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
@@ -2059,6 +2061,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         centerTitle: false,
         actions: [
+          DownloadsButton(service: widget.service),
           if (widget.isGroup)
             IconButton(
               icon: const Icon(Icons.person_add),

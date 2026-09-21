@@ -9,6 +9,7 @@ import '../models/chat_message.dart';
 import '../models/config.dart';
 import '../models/app_event.dart';
 import '../models/group_chat.dart';
+import '../models/file_download.dart';
 import '../ffi/messenger_bridge.dart' as bridge;
 import 'event_poller.dart';
 
@@ -355,6 +356,25 @@ class MessengerService {
     if (_handle <= 0) return false;
     final r = bridge.messengerSetDownloadsDir(_handle, path);
     return r.contains('"ok"');
+  }
+
+  Future<List<FileDownload>> getFileDownloads() async {
+    if (!isReady) throw StateError('Messenger is not ready');
+    final data = jsonDecode(bridge.messengerGetFileDownloads(_handle));
+    if (data is! List) throw StateError('Failed to load downloads');
+    return data
+        .map((item) => FileDownload.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> cancelFileDownload(String fileId) async {
+    if (!isReady) throw StateError('Messenger is not ready');
+    final data =
+        jsonDecode(bridge.messengerCancelFileDownload(_handle, fileId))
+            as Map<String, dynamic>;
+    if (data['status'] != 'ok') {
+      throw StateError('Failed to cancel download');
+    }
   }
 
   bool saveConfig(AppConfig newConfig) {

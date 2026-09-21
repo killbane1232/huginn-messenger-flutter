@@ -155,6 +155,12 @@ final _setDownloadsDir = _lib
     .lookupFunction<_ConfigSaveNative, _ConfigSaveDart>(
       'messenger_set_downloads_dir',
     );
+final _getFileDownloads = _lib.lookupFunction<_StrFnNative, _StrFnDart>(
+  'messenger_get_file_downloads',
+);
+final _cancelFileDownload = _lib.lookupFunction<_TwoStrNative, _TwoStrDart>(
+  'messenger_cancel_file_download',
+);
 
 String _readAndFree(Pointer<Utf8> ptr) {
   final s = ptr.toDartString();
@@ -302,4 +308,16 @@ String messengerSetDownloadsDir(int handle, String dir) {
   final r = _readAndFree(_setDownloadsDir(handle, d));
   calloc.free(d);
   return r;
+}
+
+String messengerGetFileDownloads(int handle) =>
+    _readAndFree(_getFileDownloads(handle));
+
+String messengerCancelFileDownload(int handle, String fileId) {
+  final id = fileId.toNativeUtf8();
+  try {
+    return _readAndFree(_cancelFileDownload(handle, id));
+  } finally {
+    calloc.free(id);
+  }
 }

@@ -145,4 +145,15 @@ class PlatformService {
     }
     throw UnsupportedError('No package installer for this platform.');
   }
+
+  /// Opens macOS settings; only the user can approve a blocked package there.
+  static Future<void> openUpdateSecuritySettings() async {
+    if (!Platform.isMacOS) {
+      throw UnsupportedError('Update security settings require macOS.');
+    }
+    final opened = await _platformChannel.invokeMethod<bool>(
+      'openUpdateSecuritySettings',
+    );
+    if (opened != true) throw StateError('Could not open security settings.');
+  }
 }

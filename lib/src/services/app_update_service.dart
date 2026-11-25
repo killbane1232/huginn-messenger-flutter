@@ -60,11 +60,14 @@ class AppUpdateService {
     Future<String> Function()? readVersion,
     Future<Directory> Function()? temporaryDirectory,
     Future<bool> Function(String)? openInstaller,
+    Future<void> Function()? openSecuritySettings,
     UpdatePlatform? platform,
   }) : _client = client ?? http.Client(),
        _readVersion = readVersion ?? _installedVersion,
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
        _openInstaller = openInstaller ?? PlatformService.installUpdate,
+       _openSecuritySettings =
+           openSecuritySettings ?? PlatformService.openUpdateSecuritySettings,
        platform = platform ?? _currentPlatform();
 
   static const repository = 'killbane1232/huginn-messenger-flutter';
@@ -77,12 +80,33 @@ class AppUpdateService {
   final Future<String> Function() _readVersion;
   final Future<Directory> Function() _temporaryDirectory;
   final Future<bool> Function(String) _openInstaller;
+  final Future<void> Function() _openSecuritySettings;
   final UpdatePlatform platform;
   bool _disposed = false;
   File? _downloadedFile;
   UpdateAsset? _downloadedAsset;
 
   bool get supportsInstallation => platform != UpdatePlatform.unsupported;
+
+  bool canOpenInstallationSettings(UpdateAsset asset) =>
+      platform == UpdatePlatform.macos &&
+      _downloadedAsset == asset &&
+      _downloadedFile != null;
+
+  Future<void> openInstallationSettings() async {
+    _ensureActive();
+    if (platform != UpdatePlatform.macos) {
+      throw const UpdateException('These installation settings require macOS.');
+    }
+    try {
+      await _openSecuritySettings();
+    } catch (_) {
+      throw const UpdateException(
+        'Could not open security settings. Open System Settings → '
+        'Privacy & Security manually and look for the blocked Huginn package.',
+      );
+    }
+  }
 
   static Future<String> _installedVersion() async =>
       (await PackageInfo.fromPlatform()).version;
@@ -210,7 +234,15 @@ class AppUpdateService {
     _ensureActive();
     _downloadedFile = file;
     _downloadedAsset = asset;
-    return _openInstaller(file.path);
+    try {
+      return await _openInstaller(file.path);
+    } catch (_) {
+      if (platform != UpdatePlatform.macos) rethrow;
+      throw const UpdateException(
+        'macOS could not open the installer. If the package was blocked, '
+        'use Allow installation… to review it in Privacy & Security.',
+      );
+    }
   }
 
   Future<File> _download(

@@ -270,6 +270,19 @@ Go-bridge подписывается на события ядра и помещ�
 | `peers` | `PeersEvent` | Полный обновлённый список пиров |
 | `message` | `MessageEvent` | Новое входящее или локально сохранённое сообщение |
 | `file_ready` | `FileReadyEvent` | Файл полностью восстановлен и доступен по локальному пути |
+| `muninn_connection` | `MuninnConnectionEvent` | Состояние WebSocket к Muninn: `connecting` или `connected` |
+
+Bridge проверяет локальное состояние WebSocket каждые 250 мс и публикует
+начальное состояние и его изменения. Сетевых запросов эта проверка не делает;
+успешный HTTP health check не считается подключением. При заполненной очереди
+текущее состояние будет отправлено повторно на следующем tick.
+
+`MessengerService.muninnConnectionState` хранит последнее состояние, поэтому
+индикатор на новом экране сразу показывает его без ожидания следующего события.
+При создании или пересоздании ядра устанавливается `connecting`, при ошибке
+создания — `disconnected`. Метка показана при запуске, на экране первого входа,
+в списке чатов, чате, настройках и загрузках. Для её работы нужна библиотека
+Go-ядра с событием `muninn_connection`; C ABI не менялся.
 
 Flutter каждые 50 мс вызывает `messenger_get_event(handle, 0)` и забирает до
 16 событий за один tick. Вызов неблокирующий, поэтому polling не ждёт внутри
@@ -283,7 +296,7 @@ sequenceDiagram
     participant S as MessengerService
     participant UI as Flutter screens
 
-    Core->>Q: peers / message / file_ready
+    Core->>Q: peers / message / file_ready / muninn_connection
     loop каждые 50 ms
         Poll->>Q: get_event(timeout=0), до 16 раз
         Q-->>Poll: JSON event или пустая строка

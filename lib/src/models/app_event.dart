@@ -11,6 +11,13 @@ class PeersEvent extends AppEvent {
   PeersEvent(this.peers) : super('peers');
 }
 
+enum MuninnConnectionState { disconnected, connecting, connected }
+
+class MuninnConnectionEvent extends AppEvent {
+  final MuninnConnectionState state;
+  MuninnConnectionEvent(this.state) : super('muninn_connection');
+}
+
 class MessageEvent extends AppEvent {
   final ChatMessage message;
   MessageEvent(this.message) : super('message');

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/file_download.dart';
 import '../services/messenger_service.dart';
+import 'muninn_connection_indicator.dart';
 
 class DownloadsButton extends StatelessWidget {
   final MessengerService service;
@@ -89,18 +90,24 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Downloads')),
-    body: Column(
-      children: [
-        if (_loadFailed)
-          MaterialBanner(
-            content: const Text('Could not load downloads.'),
-            actions: [
-              TextButton(onPressed: _refresh, child: const Text('Retry')),
-            ],
-          ),
-        Expanded(child: _buildList()),
-      ],
+    appBar: AppBar(
+      title: const Text('Downloads'),
+      bottom: MuninnConnectionIndicator(service: widget.service),
+    ),
+    body: SafeArea(
+      top: false,
+      child: Column(
+        children: [
+          if (_loadFailed)
+            MaterialBanner(
+              content: const Text('Could not load downloads.'),
+              actions: [
+                TextButton(onPressed: _refresh, child: const Text('Retry')),
+              ],
+            ),
+          Expanded(child: _buildList()),
+        ],
+      ),
     ),
   );
 

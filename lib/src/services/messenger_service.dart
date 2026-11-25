@@ -27,6 +27,8 @@ class MessengerService {
   String? _currentUsername;
   String? _dbPath;
   String? _lastSendError;
+  MuninnConnectionState _muninnConnectionState =
+      MuninnConnectionState.disconnected;
   Timer? _pollTimer;
   final _eventCtrl = StreamController<AppEvent>.broadcast();
   final _peersCtrl = StreamController<List<Peer>>.broadcast();
@@ -38,6 +40,7 @@ class MessengerService {
   String? get currentUserId => _currentUserId;
   String? get currentUsername => _currentUsername;
   String? get lastSendError => _lastSendError;
+  MuninnConnectionState get muninnConnectionState => _muninnConnectionState;
   Stream<AppEvent> get events => _eventCtrl.stream;
   Stream<List<Peer>> get peersStream => _peersCtrl.stream;
   AppConfig get config {
@@ -137,6 +140,7 @@ class MessengerService {
         muninnIce.values.any((ice) => ice.validationError != null)) {
       return false;
     }
+    _setMuninnConnectionState(MuninnConnectionState.connecting);
     username ??= _uuid.v4();
     dbPath ??= await _defaultDbPath();
     _dbPath = dbPath;
@@ -164,6 +168,7 @@ class MessengerService {
         if (candidates.isEmpty ||
             candidates.length > AppConfig.maxMuninnServers ||
             !candidates.every(AppConfig.isValidMuninnAddr)) {
+          _setMuninnConnectionState(MuninnConnectionState.disconnected);
           return false;
         }
         initialConfig.setMuninnServers(candidates);
@@ -171,9 +176,11 @@ class MessengerService {
         muninnServers = initialConfig.muninnServers;
         muninnIce = initialConfig.muninnIce;
         if (muninnIce.values.any((ice) => ice.validationError != null)) {
+          _setMuninnConnectionState(MuninnConnectionState.disconnected);
           return false;
         }
       } catch (_) {
+        _setMuninnConnectionState(MuninnConnectionState.disconnected);
         return false;
       }
       _handle = bridge.messengerCreate(
@@ -187,7 +194,10 @@ class MessengerService {
         ),
       );
     }
-    if (_handle <= 0) return false;
+    if (_handle <= 0) {
+      _setMuninnConnectionState(MuninnConnectionState.disconnected);
+      return false;
+    }
     _loadMe();
     _loadConfig();
     loadPeers();
@@ -218,6 +228,12 @@ class MessengerService {
     _pollTimer = Timer.periodic(eventPollInterval, (_) => _poll());
   }
 
+  void _setMuninnConnectionState(MuninnConnectionState state) {
+    if (_muninnConnectionState == state) return;
+    _muninnConnectionState = state;
+    _eventCtrl.add(MuninnConnectionEvent(state));
+  }
+
   void _poll() {
     if (_handle <= 0) return;
     drainNativeEvents(
@@ -231,7 +247,10 @@ class MessengerService {
       final data = jsonDecode(json) as Map<String, dynamic>;
       final type = data['type'] as String?;
       final raw = data['data'];
-      if (type == 'peers' && raw != null) {
+      if (type == 'muninn_connection' && raw != null) {
+        final state = (raw as Map<String, dynamic>)['state'] as String;
+        _setMuninnConnectionState(MuninnConnectionState.values.byName(state));
+      } else if (type == 'peers' && raw != null) {
         final list = (raw as List)
             .map((e) => Peer.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -466,6 +485,7 @@ class MessengerService {
   bool _recreate(String username) {
     if (_handle <= 0 || _dbPath == null || username.isEmpty) return false;
     _pollTimer?.cancel();
+    _setMuninnConnectionState(MuninnConnectionState.connecting);
     bridge.messengerDestroy(_handle);
     _handle = bridge.messengerCreate(
       username,
@@ -477,7 +497,10 @@ class MessengerService {
         (server, ice) => MapEntry(server, ice.toJson()),
       ),
     );
-    if (_handle <= 0) return false;
+    if (_handle <= 0) {
+      _setMuninnConnectionState(MuninnConnectionState.disconnected);
+      return false;
+    }
     _currentUserId = null;
     _lastPeers = [];
     _filePaths.clear();

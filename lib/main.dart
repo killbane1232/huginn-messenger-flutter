@@ -532,6 +532,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<GroupChat> _groups = [];
   final Map<String, ChatMessage> _lastMessages = {};
   final Set<String> _loadedMessagePreviews = {};
+  final Map<String, int> _previewVersions = {};
+  Set<String> _hiddenChatIds = {};
+  final Set<String> _deletedSearchResults = {};
   final _searchCtrl = TextEditingController();
   bool _searching = false;
   StreamSubscription<List<Peer>>? _peersSub;
@@ -540,7 +543,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Peer> get _visiblePeers {
     final groupIds = _groups.map((group) => group.uid).toSet();
     final peers = _peers
-        .where((peer) => !groupIds.contains(peer.displayLogin))
+        .where(
+          (peer) =>
+              !groupIds.contains(peer.displayLogin) && _isChatVisible(peer.key),
+        )
         .toList();
     peers.sort((a, b) {
       final aMessage = _lastMessages[a.key];
@@ -562,32 +568,43 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<GroupChat> get _visibleGroups {
-    if (!_searching) return _groups;
+    final groups = _groups.where((group) => _isChatVisible(group.uid));
+    if (!_searching) return groups.toList();
 
     final query = _searchCtrl.text.trim().toLowerCase();
-    return _groups.where((group) {
+    return groups.where((group) {
       return group.name.toLowerCase().contains(query) ||
           group.uid.toLowerCase().contains(query);
     }).toList();
   }
 
+  bool _isChatVisible(String chatId) => _searching
+      ? !_deletedSearchResults.contains(chatId)
+      : !_hiddenChatIds.contains(chatId);
+
   @override
   void initState() {
     super.initState();
+    _hiddenChatIds = widget.service.getHiddenChatIds();
     _peersSub = widget.service.peersStream.listen((peers) {
       if (!mounted || _searching) return;
-      setState(() => _peers = peers);
+      setState(() {
+        _hiddenChatIds = widget.service.getHiddenChatIds();
+        _peers = peers;
+      });
       unawaited(_loadMessagePreviews());
     });
     _eventSub = widget.service.events.listen((event) {
       if (!mounted || event is! MessageEvent) return;
+      _hiddenChatIds = widget.service.getHiddenChatIds();
       _loadGroups();
       final message = event.message;
       if (message.chatId.isEmpty) {
         // Older cores omit the chat ID, including for outgoing/group messages.
         // Read each chat's history instead of guessing from the sender.
         unawaited(_loadMessagePreviews(refresh: true));
-      } else {
+      } else if (!_hiddenChatIds.contains(message.chatId)) {
+        _deletedSearchResults.remove(message.chatId);
         _rememberLastMessage(message.chatId, message);
       }
     });
@@ -613,11 +630,13 @@ class _HomeScreenState extends State<HomeScreen> {
     };
     for (final peerId in peerIds) {
       if (!_loadedMessagePreviews.add(peerId) && !refresh) continue;
+      final version = _previewVersions[peerId] ?? 0;
       final messages = await widget.service.getMessagesPaginated(
         peerId,
         limit: 1,
       );
       if (!mounted) return;
+      if ((_previewVersions[peerId] ?? 0) != version) continue;
       if (messages.isNotEmpty) {
         _rememberLastMessage(peerId, messages.last);
       }
@@ -642,6 +661,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _search(String q) {
+    _deletedSearchResults.clear();
     final query = q.trim();
     if (query.length < _minSearchLength) {
       setState(() {
@@ -704,6 +724,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refresh() async {
+    _hiddenChatIds = widget.service.getHiddenChatIds();
     _loadGroups();
     widget.service.refreshPeers();
     await _loadMessagePreviews(refresh: true);
@@ -877,100 +898,197 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _groupTile(GroupChat g) {
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: Colors.indigo,
-        child: const Icon(Icons.group, color: Colors.white, size: 22),
-      ),
-      title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.chevron_right),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatScreen(
-              service: widget.service,
-              peerId: g.uid,
-              peerName: g.name,
-              isGroup: true,
+    return _chatContextMenu(
+      chatId: g.uid,
+      name: g.name,
+      child: ListTile(
+        key: ValueKey(g.uid),
+        leading: CircleAvatar(
+          backgroundColor: Colors.indigo,
+          child: const Icon(Icons.group, color: Colors.white, size: 22),
+        ),
+        title: Text(
+          g.name,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ChatScreen(
+                service: widget.service,
+                peerId: g.uid,
+                peerName: g.name,
+                isGroup: true,
+              ),
             ),
-          ),
-        );
-        _loadGroups();
-      },
+          );
+          _loadGroups();
+        },
+      ),
     );
   }
 
   Widget _peerTile(Peer p, ThemeData theme) {
     final lastMessage = _lastMessages[p.key];
-    return ListTile(
-      key: ValueKey(p.key),
-      leading: Stack(
-        children: [
-          CircleAvatar(
-            backgroundColor: p.online ? Colors.green : Colors.grey[400],
-            child: Text(
-              p.displayLogin.isNotEmpty ? p.displayLogin[0].toUpperCase() : '?',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          if (p.online)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: theme.scaffoldBackgroundColor,
-                    width: 2,
-                  ),
+    return _chatContextMenu(
+      chatId: p.key,
+      name: p.displayLogin,
+      child: ListTile(
+        key: ValueKey(p.key),
+        leading: Stack(
+          children: [
+            CircleAvatar(
+              backgroundColor: p.online ? Colors.green : Colors.grey[400],
+              child: Text(
+                p.displayLogin.isNotEmpty
+                    ? p.displayLogin[0].toUpperCase()
+                    : '?',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-        ],
-      ),
-      title: Text(
-        p.displayLogin,
-        style: const TextStyle(fontWeight: FontWeight.w500),
-      ),
-      subtitle: Text(
-        lastMessage?.preview ?? 'No messages yet',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: p.online
-          ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
+            if (p.online)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: theme.scaffoldBackgroundColor,
+                      width: 2,
+                    ),
+                  ),
+                ),
               ),
-              child: const Text(
-                'online',
-                style: TextStyle(fontSize: 11, color: Colors.green),
-              ),
-            )
-          : null,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatScreen(
-            service: widget.service,
-            peerId: p.key,
-            peerName: p.displayLogin,
+          ],
+        ),
+        title: Text(
+          p.displayLogin,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Text(
+          lastMessage?.preview ?? 'No messages yet',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: p.online
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'online',
+                  style: TextStyle(fontSize: 11, color: Colors.green),
+                ),
+              )
+            : null,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              service: widget.service,
+              peerId: p.key,
+              peerName: p.displayLogin,
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _chatContextMenu({
+    required String chatId,
+    required String name,
+    required Widget child,
+  }) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onLongPressStart: (details) =>
+        _showChatMenu(chatId, name, details.globalPosition),
+    onSecondaryTapDown: (details) =>
+        _showChatMenu(chatId, name, details.globalPosition),
+    child: child,
+  );
+
+  Future<void> _showChatMenu(
+    String chatId,
+    String name,
+    Offset position,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final localPosition = overlay.globalToLocal(position);
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(localPosition.dx, localPosition.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              const SizedBox(width: 12),
+              const Text('Delete chat'),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (!mounted || action != 'delete') return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete chat?'),
+        content: Text(
+          'Delete "$name" and its message history from this device? '
+          'New messages will bring the chat back. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    if (!widget.service.deleteChat(chatId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to delete chat. Try again.')),
+      );
+      return;
+    }
+    setState(() {
+      _hiddenChatIds = {..._hiddenChatIds, chatId};
+      _deletedSearchResults.add(chatId);
+      _lastMessages.remove(chatId);
+      _loadedMessagePreviews.remove(chatId);
+      _previewVersions[chatId] = (_previewVersions[chatId] ?? 0) + 1;
+    });
   }
 }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:huginn_messenger/huginn_messenger.dart';
@@ -10,6 +11,10 @@ class _FakeMessengerService extends MessengerService {
   final messageEvents = StreamController<AppEvent>.broadcast();
   List<Peer> peerList = [];
   List<Peer> searchResults = [];
+  List<GroupChat> groupList = [];
+  final hiddenChats = <String>{};
+  final deletedChats = <String>[];
+  bool deleteSucceeds = true;
   final history = <String, ChatMessage>{};
   final historyRequests = <({String peerId, int limit, int offset})>[];
   final pendingHistory = <String, Completer<List<ChatMessage>>>{};
@@ -21,7 +26,19 @@ class _FakeMessengerService extends MessengerService {
   List<Peer> getPeers() => peerList;
 
   @override
-  List<GroupChat> getGroups() => [];
+  List<GroupChat> getGroups() => groupList;
+
+  @override
+  Set<String> getHiddenChatIds() => Set.of(hiddenChats);
+
+  @override
+  bool deleteChat(String chatId) {
+    if (!deleteSucceeds) return false;
+    deletedChats.add(chatId);
+    hiddenChats.add(chatId);
+    history.remove(chatId);
+    return true;
+  }
 
   @override
   Stream<List<Peer>> get peersStream => peerEvents.stream;
@@ -87,6 +104,170 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: HomeScreen(service: service)));
     await tester.pumpAndSettle();
   }
+
+  Future<void> selectDelete(
+    WidgetTester tester,
+    String chatId, {
+    bool secondary = false,
+  }) async {
+    final tile = find.byKey(ValueKey(chatId));
+    if (secondary) {
+      await tester.tap(tile, buttons: kSecondaryMouseButton);
+    } else {
+      await tester.longPress(tile);
+    }
+    await tester.pumpAndSettle();
+    expect(find.byType(ChatScreen), findsNothing);
+    expect(find.text('Delete chat'), findsOneWidget);
+    await tester.tap(find.text('Delete chat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete chat?'), findsOneWidget);
+    expect(service.deletedChats, isEmpty);
+  }
+
+  testWidgets('long press offers deletion and cancellation keeps history', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.history[alice.key] = _message(
+      alice,
+      'Keep me',
+      '2026-11-25T10:00:00Z',
+    );
+    await showHome(tester);
+    await selectDelete(tester, alice.key);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(service.deletedChats, isEmpty);
+    expect(find.text('Keep me'), findsOneWidget);
+    expect(find.byKey(ValueKey(alice.key)), findsOneWidget);
+  });
+
+  testWidgets('deleted peer stays hidden after refresh and reopening home', (
+    tester,
+  ) async {
+    service.peerList = [alice, bob];
+    service.history[alice.key] = _message(
+      alice,
+      'Old history',
+      '2026-11-25T10:00:00Z',
+    );
+    await showHome(tester);
+    await selectDelete(tester, alice.key);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(service.deletedChats, [alice.key]);
+    expect(service.history[alice.key], isNull);
+    expect(_peerOrder(tester), [bob.key]);
+    service.refreshPeers();
+    service.messageEvents.add(
+      MessageEvent(_message(alice, 'Queued old event', '2026-11-25T10:00:00Z')),
+    );
+    await tester.pumpAndSettle();
+    expect(_peerOrder(tester), [bob.key]);
+    await tester.pumpWidget(const SizedBox());
+    await showHome(tester);
+    expect(_peerOrder(tester), [bob.key]);
+    service.hiddenChats.remove(alice.key);
+    service.messageEvents.add(
+      MessageEvent(_message(alice, 'New message', '2026-11-25T11:00:00Z')),
+    );
+    await tester.pumpAndSettle();
+    expect(_peerOrder(tester), [alice.key, bob.key]);
+    expect(find.text('New message'), findsOneWidget);
+    expect(find.text('Old history'), findsNothing);
+  });
+
+  testWidgets('secondary click deletes a group without deleting other chats', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.groupList = [GroupChat(uid: 'group-id', name: 'Friends')];
+    await showHome(tester);
+    await selectDelete(tester, 'group-id', secondary: true);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(service.deletedChats, ['group-id']);
+    expect(find.text('Friends'), findsNothing);
+    expect(find.byKey(ValueKey(alice.key)), findsOneWidget);
+    service.refreshPeers();
+    service.messageEvents.add(
+      MessageEvent(_message(alice, 'Hello', '2026-11-25T11:00:00Z')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Friends'), findsNothing);
+    service.hiddenChats.remove('group-id');
+    service.messageEvents.add(
+      MessageEvent(
+        _message(
+          alice,
+          'Group message',
+          '2026-11-25T12:00:00Z',
+          chatId: 'group-id',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Friends'), findsOneWidget);
+  });
+
+  testWidgets('failed deletion keeps the conversation and reports the error', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.deleteSucceeds = false;
+    await showHome(tester);
+    await selectDelete(tester, alice.key, secondary: true);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey(alice.key)), findsOneWidget);
+    expect(find.text('Failed to delete chat. Try again.'), findsOneWidget);
+    expect(service.hiddenChats, isEmpty);
+  });
+
+  testWidgets('deleted chats can be found again through an explicit search', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.searchResults = [alice];
+    service.hiddenChats.add(alice.key);
+    await showHome(tester);
+    expect(find.text('No conversations yet'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Alice');
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey(alice.key)), findsOneWidget);
+    await selectDelete(tester, alice.key);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey(alice.key)), findsNothing);
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pumpAndSettle();
+    expect(find.text('No conversations yet'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Alice');
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey(alice.key)), findsOneWidget);
+  });
+
+  testWidgets('pending preview cannot restore history after deletion', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.searchResults = [alice];
+    final pending = Completer<List<ChatMessage>>();
+    service.pendingHistory[alice.key] = pending;
+    await showHome(tester);
+    await selectDelete(tester, alice.key);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    pending.complete([
+      _message(alice, 'Deleted preview', '2026-11-25T12:00:00Z'),
+    ]);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Alice');
+    await tester.pumpAndSettle();
+    expect(find.text('Deleted preview'), findsNothing);
+    expect(find.text('No messages yet'), findsOneWidget);
+  });
 
   testWidgets('loads last messages and sorts by full timestamp, then name', (
     tester,

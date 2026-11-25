@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/services.dart';
+import 'macos_notification_service.dart';
 
 class NotificationService {
   static const _notificationIcon = 'ic_notification';
@@ -13,11 +14,13 @@ class NotificationService {
   );
 
   static FlutterLocalNotificationsPlugin? _androidPlugin;
+  static MacOSNotificationService? _macOSNotifications;
   static bool _initialized = false;
   static bool _notificationsEnabled = true;
   static String _activeNotificationIcon = _notificationIcon;
 
-  static bool get notificationsEnabled => _notificationsEnabled;
+  static bool get notificationsEnabled =>
+      _macOSNotifications?.notificationsEnabled ?? _notificationsEnabled;
 
   static Future<String?> init({
     required void Function(String chatId) onNotificationTap,
@@ -28,7 +31,23 @@ class NotificationService {
     if (Platform.isAndroid) {
       return _initAndroid(onNotificationTap);
     }
+    if (Platform.isMacOS) {
+      _macOSNotifications = MacOSNotificationService();
+      try {
+        return await _macOSNotifications!.init(
+          onNotificationTap: onNotificationTap,
+        );
+      } catch (_) {
+        _initialized = false;
+        _macOSNotifications = null;
+        rethrow;
+      }
+    }
     return null;
+  }
+
+  static Future<void> openMacOSSettings() async {
+    await _macOSNotifications?.openSettings();
   }
 
   static Future<String?> _initAndroid(
@@ -101,6 +120,12 @@ class NotificationService {
   }) async {
     if (Platform.isAndroid) {
       await _showAndroid(chatId, peerName, text);
+    } else if (Platform.isMacOS) {
+      await _macOSNotifications?.showMessage(
+        chatId: chatId,
+        peerName: peerName,
+        text: text,
+      );
     } else if (Platform.isLinux) {
       await _showLinux(peerName, text);
     }

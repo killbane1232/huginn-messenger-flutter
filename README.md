@@ -18,8 +18,9 @@ Huginn-пирами.
 - ответы, пересылка и текстовые стикеры;
 - поиск пиров и групп от трёх символов;
 - relogin через текстовый ключ или QR-код;
-- Android/Linux notifications и переход в чат по notification tap;
+- уведомления Android/Linux/macOS; на Android/macOS — переход в чат по нажатию;
 - настройка Muninn, chunk TTL и TURN.
+- проверка новых версий и загрузка установочных пакетов из GitHub Releases.
 
 Успешная отправка с обновлённым ядром означает сохранение сообщения и
 зашифрованных вложений в SQLite для фоновой доставки. Очередь переживает
@@ -60,7 +61,8 @@ flowchart LR
 |---|---|
 | Android | Библиотеки четырёх ABI собираются из submodule через `build.sh` |
 | Linux | Библиотека собирается из submodule и упаковывается через CMake |
-| iOS / macOS | Flutter runner есть, но native framework не входит в `build.sh` |
+| macOS | Apple Silicon и Intel; Go framework и release runner через `scripts/build-apple.sh macos` |
+| iOS | Устройство arm64 и симулятор arm64/x86_64; статическое Go XCFramework через `scripts/build-apple.sh ios` |
 | Windows | Flutter runner есть, но native DLL не входит в `build.sh` |
 
 ## Подготовка
@@ -111,6 +113,81 @@ HUGINN_NATIVE_TESTS=1 LD_LIBRARY_PATH="$PWD/native/linux/amd64" \
 На Linux ARM64 используйте `native/linux/arm64`. Проверка обновления submodule
 и сборочного скрипта без доступа к сети: `python3 scripts/test_build_core.py`.
 
+## Сборка macOS и iOS
+
+Нужны macOS, полный Xcode с macOS/iOS SDK, Flutter (Dart >= 3.12.2), Go и
+CocoaPods. Одних Xcode Command Line Tools недостаточно для Flutter runner.
+Минимальные версии приложения: macOS 13 и iOS 15. CocoaPods используется для
+плагинов и локального Go-ядра; Swift Package Manager отключён в `pubspec.yaml`.
+
+После установки и первого запуска Xcode:
+
+```bash
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -runFirstLaunch
+brew install cocoapods
+flutter doctor -v
+scripts/build-apple.sh         # анализ, тесты, macOS release, iOS release и simulator
+scripts/build-apple.sh macos   # только macOS
+scripts/build-apple.sh ios     # только iOS
+```
+
+На macOS `./build.sh` вызывает ту же Apple-сборку. В GitHub Actions workflow
+`Tests` добавлена отдельная macOS job для обеих платформ; его можно запустить
+вручную. Job сохраняет ZIP-архивы macOS, iOS без подписи и iOS simulator.
+
+Если Flutter или Go отсутствуют в PATH, задайте `FLUTTER_BIN` и `GO_BIN`
+полными путями к исполняемым файлам. Скрипты запускаются из любого каталога.
+
+Результаты:
+
+- macOS: `build/macos/Build/Products/Release/huginn_messenger.app`;
+- iOS release без подписи: `build/ios/iphoneos/Runner.app`;
+- iOS simulator debug: `build/ios/iphonesimulator/Runner.app`.
+
+Сборка iOS без подписи проверяет компиляцию для устройства. Для установки на
+iPhone или создания IPA выберите свою Team в `ios/Runner.xcworkspace` и
+настройте подпись; после этого можно выполнить `flutter build ipa --release`.
+
+Отдельная сборка ядра перед прямым вызовом `flutter build`:
+
+```bash
+scripts/build-apple-core.sh macos
+scripts/build-apple-core.sh ios
+```
+
+macOS получает универсальный динамический `huginn_messenger.framework`;
+iOS — `HuginnCore.xcframework` со статическими архивами для устройства и
+симулятора. CocoaPods упаковывает ядро в runner; iOS сохраняет экспортированные
+`messenger_*` символы для `DynamicLibrary.process()` даже в release.
+Собранные `ios/Frameworks/` и `macos/Frameworks/` игнорируются Git.
+Фактический SHA ядра записывается в `native/apple/core-revision.txt`.
+
+Нативная проверка на macOS использует собранный framework:
+
+```bash
+HUGINN_NATIVE_TESTS=1 \
+HUGINN_LIBRARY_PATH="$PWD/macos/Frameworks/huginn_messenger.framework/huginn_messenger" \
+  flutter test
+```
+
+Проверка нативного запуска macOS (значок строки меню, иконка Dock и повторное
+открытие окна) выполняется без загрузки пользовательской базы и сетевых
+соединений:
+
+```bash
+flutter build macos --debug --target test/native_ui_host.dart
+xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -parallel-testing-enabled NO FLUTTER_TARGET="$PWD/test/native_ui_host.dart"
+flutter build macos --debug   # вернуть обычное приложение вместо тестового host
+```
+
+Иконки macOS генерируются командой `swift scripts/generate-macos-icons.swift`
+из `macos/AppIcon-source.png`. Скрипт выравнивает видимый контур до квадрата
+824 × 824 на холсте 1024 × 1024, задаёт одинаковые скругления и прозрачные поля,
+затем создаёт все размеры AppIcon. После обновления иконок пересоберите приложение.
+
 ## Release-сборка Android и Linux
 
 ```bash
@@ -151,6 +228,46 @@ test/                                 Flutter tests
 docs/                                 Flutter documentation
 ```
 
+## Обновления из GitHub
+
+В **Settings → App updates** отображается установленная версия. Кнопка
+**Check for updates** проверяет последний стабильный релиз в
+`killbane1232/huginn-messenger-flutter`; **Install update** скачивает пакет,
+проверяет размер и SHA-256 из GitHub API и открывает системный установщик.
+Завершите установку в его окне и перезапустите Huginn. Если пакета для текущей
+платформы нет, кнопка установки недоступна. Сетевые ошибки можно повторить;
+незавершённые или повреждённые загрузки не передаются установщику.
+
+- Android: APK. При первом обновлении разрешите Huginn устанавливать приложения
+  и повторно нажмите **Install update**; проверенный файл используется повторно.
+  Обновление должно иметь ту же Android-подпись, что установленное приложение.
+- macOS: универсальный PKG для Apple Silicon и Intel, установка в `/Applications`.
+  Текущий workflow не настраивает Developer ID Installer и notarization; пакет
+  без них может потребовать разрешения macOS. Подпись и notarization нужны для
+  распространения без предупреждений Gatekeeper.
+- Linux: DEB для x64, собранный на Ubuntu 24.04; нужен графический обработчик
+  DEB через `xdg-open`. При его отсутствии ошибка содержит путь к скачанному
+  пакету для ручной установки. Старые распакованные копии приложения остаются
+  на месте; запускайте установленную версию. Путь к базе Linux по-прежнему
+  зависит от рабочей директории, поэтому сохраняйте её при переходе с bundle.
+- iOS и Windows: установка GitHub-пакетов не поддерживается.
+
+Workflow **Build & Release** на тегах `v<SemVer>` публикует GitHub Release
+после успешной сборки всех трёх пакетов. Ручной запуск сохраняет только
+артефакты Actions. Теги с prerelease-суффиксом публикуются как prerelease и
+не предлагаются клиентом. Имена файлов стабильного релиза:
+
+```text
+huginn-messenger-<version>.apk
+huginn-messenger-<version>-macos-universal.pkg
+huginn-messenger-<version>-linux-x64.deb
+```
+
+Версия в APK, Linux-приложении и macOS bundle задаётся из тега. Проверка
+сравнивает SemVer без build metadata; для выпуска обновления увеличивайте
+версию, например `v1.0.1`. До первой публикации нового release workflow
+клиент сообщает об отсутствии релиза или совместимого пакета.
+
 ## Конфигурация
 
 Начальный адрес Muninn задаётся ключом `muninn` в `assets/config.json`,
@@ -169,7 +286,7 @@ docs/                                 Flutter documentation
 - SQLite: `huginn.db`;
 - TURN: выключен до задания адреса.
 
-На Android/iOS база размещается в application documents directory, на desktop
+На Android/iOS/macOS база размещается в application documents directory, на остальных desktop
 относительный путь разрешается от рабочей директории.
 
 ## Разработка FFI

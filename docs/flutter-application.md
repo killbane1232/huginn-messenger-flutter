@@ -107,7 +107,8 @@ huginn_messenger/
 ├── test/                                  # Flutter unit/widget tests
 ├── android/                               # Android runner, Kotlin channels и jniLibs
 ├── linux/                                 # Linux runner и упаковка готовой библиотеки
-├── ios/ macos/ windows/                   # runners без полной сборки в build.sh
+├── ios/ macos/                           # Apple runners + локальное Go-ядро
+├── windows/                              # runner без полной сборки в build.sh
 ├── src/huginn-messenger/                  # Go core submodule, branch = main
 ├── native/linux/                          # собранная Linux library, ignored
 ├── scripts/build-core-libraries.sh        # обновление main и сборка ядра
@@ -336,7 +337,8 @@ Relogin заменяет ключи целевой идентичности. QR-
 |---|---|
 | Android | Есть сборка четырёх ABI, foreground service, уведомления, QR-сканер, downloads и `FileProvider` |
 | Linux | CMake упаковывает shared library, собранную из submodule; доступны `notify-send` и `xdg-open`; входит в `build.sh` |
-| iOS / macOS | Dart умеет загрузить framework, но `build.sh` не собирает и не упаковывает его |
+| macOS | Universal Go framework (arm64/x86_64), CocoaPods, release runner через `scripts/build-apple.sh macos` |
+| iOS | Статическое Go XCFramework для устройства и симулятора; сборка через `scripts/build-apple.sh ios` |
 | Windows | Dart умеет загрузить DLL, но `build.sh` не собирает и не упаковывает её |
 
 Android foreground service показывает постоянное low-priority уведомление и
@@ -346,6 +348,23 @@ Android foreground service показывает постоянное low-priorit
 Android-уведомления используют канал `huginn_messages`; payload содержит
 `chat_id`. Обрабатываются как нажатия при работающем приложении, так и запуск из
 уведомления. На Linux уведомления отправляются через `notify-send`.
+
+macOS запрашивает разрешение на баннеры и звук через User Notifications.
+Уведомления содержат ключ чата: нажатие открывает соответствующий личный или
+групповой чат и возвращает скрытое окно. При отказе приложение показывает
+предупреждение; системные настройки доступны также из Settings → Notification
+settings. Изменение разрешений применяется без перезапуска. Закрытие окна
+сохраняет работающий мессенджер и получение уведомлений; для завершения
+используйте Quit или Cmd+Q. После завершения процесса новые локальные
+уведомления не поступают. Уже показанное уведомление может снова запустить
+приложение и открыть чат.
+
+В строке меню macOS доступна иконка Huginn. Её меню позволяет открыть главное
+окно, перейти в настройки уведомлений и завершить приложение. Векторный силуэт
+ворона адаптируется к светлой и тёмной строке меню.
+
+Иконки macOS и iOS создаются из того же `icon.png`, который используется на
+Android и Linux.
 
 ## Конфигурация и локальные данные
 
@@ -358,7 +377,7 @@ Android-уведомления используют канал `huginn_messages`
 | Database | `huginn.db` |
 | TURN | выключен, пока адрес пуст |
 
-На Android и iOS база создаётся в application documents directory. На desktop
+На Android, iOS и macOS база создаётся в application documents directory. На остальных desktop
 относительный путь `huginn.db` разрешается от текущей рабочей директории.
 Конфигурация, ключи, контакты, группы и история принадлежат Go-хранилищу SQLite.
 
@@ -395,6 +414,10 @@ cd /home/killbane/git/huginmunin/huginn_messenger
 Для сборки ядра нужны Go и C-компилятор, для Android — SDK и NDK.
 Путь к NDK задаётся через `ANDROID_NDK_HOME`/`ANDROID_NDK_ROOT` или определяется
 по последней установленной версии в SDK. Скрипт рассчитан на Linux.
+Сборка Apple-платформ выполняется на macOS через `scripts/build-apple.sh`;
+требуются полный Xcode, Flutter, Go и CocoaPods. Подробные команды и пути
+артефактов описаны в [README](../README.md#сборка-macos-и-ios).
+
 Можно собрать только библиотеки: `scripts/build-core-libraries.sh linux`
 или `scripts/build-core-libraries.sh android`, затем вызвать `flutter build`.
 Каждый запуск скрипта обновляет `main` и выводит фактический SHA в лог.

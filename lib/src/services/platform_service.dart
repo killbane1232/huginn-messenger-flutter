@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'messenger_service.dart';
+import 'notification_service.dart';
 
 class PlatformService {
   static const _androidChannel = MethodChannel(
@@ -75,9 +76,20 @@ class PlatformService {
   }
 
   static Future<void> openNotificationSettings() async {
+    if (Platform.isMacOS) {
+      await NotificationService.openMacOSSettings();
+      return;
+    }
     if (!Platform.isAndroid) return;
     try {
       await _platformChannel.invokeMethod('openNotificationSettings');
+    } catch (_) {}
+  }
+
+  static Future<void> showMainWindow() async {
+    if (!Platform.isMacOS) return;
+    try {
+      await _platformChannel.invokeMethod('showWindow');
     } catch (_) {}
   }
 
@@ -109,5 +121,28 @@ class PlatformService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Opens an OS installer; false means Android needs install-source permission.
+  static Future<bool> installUpdate(String path) async {
+    if (Platform.isAndroid || Platform.isMacOS) {
+      final opened = await _platformChannel.invokeMethod<bool>(
+        'installUpdate',
+        {'path': path},
+      );
+      if (opened == null) throw StateError('The installer did not respond.');
+      return opened;
+    }
+    if (Platform.isLinux) {
+      final result = await Process.run('xdg-open', [path]);
+      if (result.exitCode != 0) {
+        throw StateError(
+          'Could not open the package installer. Install the downloaded package '
+          'with your package manager: $path. ${result.stderr}',
+        );
+      }
+      return true;
+    }
+    throw UnsupportedError('No package installer for this platform.');
   }
 }

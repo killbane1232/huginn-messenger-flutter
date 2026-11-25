@@ -1,4 +1,4 @@
-library huginn_messenger;
+library;
 
 export 'src/ffi/messenger_bridge.dart';
 export 'src/services/messenger_service.dart';

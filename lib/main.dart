@@ -1139,7 +1139,7 @@ class _ForwardTarget {
 class _ChatScreenState extends State<ChatScreen> {
   final _msgCtrl = TextEditingController();
   final _msgFocus = FocusNode();
-  final _scrollCtrl = ScrollController();
+  final _scrollCtrl = ScrollController(keepScrollOffset: false);
   List<ChatMessage> _msgs = [];
   bool _loading = true;
   bool _loadingMore = false;
@@ -1169,9 +1169,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
+      if (mounted && _scrollCtrl.hasClients) {
         _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
+          _scrollCtrl.position.minScrollExtent,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
@@ -1613,7 +1613,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onScroll() {
-    if (_scrollCtrl.offset <= 100 &&
+    if (_scrollCtrl.position.extentAfter <= 100 &&
         !_loadingMore &&
         !_allLoaded &&
         _msgs.isNotEmpty) {
@@ -1635,15 +1635,12 @@ class _ChatScreenState extends State<ChatScreen> {
       _allLoaded = msgs.length < _pageSize;
       _loading = false;
     });
-    _scrollToBottom();
+    // The reversed list starts at the newest message on its first layout.
   }
 
   Future<void> _loadMore() async {
     if (_loadingMore || _allLoaded) return;
     setState(() => _loadingMore = true);
-    final oldMax = _scrollCtrl.hasClients
-        ? _scrollCtrl.position.maxScrollExtent
-        : 0.0;
     final olderMsgs = await widget.service.getMessagesPaginated(
       widget.peerId,
       limit: _pageSize,
@@ -1660,14 +1657,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       _loadingMore = false;
     });
-    if (olderMsgs.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollCtrl.hasClients) {
-          final newMax = _scrollCtrl.position.maxScrollExtent;
-          _scrollCtrl.jumpTo(_scrollCtrl.offset + (newMax - oldMax));
-        }
-      });
-    }
+    // Older rows extend the far end of the reversed list, preserving the offset.
   }
 
   @override
@@ -1720,10 +1710,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? _emptyChat(theme)
                   : ListView.builder(
                       controller: _scrollCtrl,
+                      // Anchor the latest message to the composer, including
+                      // while the keyboard or a multiline input resizes it.
+                      reverse: true,
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       itemCount: _msgs.length + (_loadingMore ? 1 : 0),
                       itemBuilder: (_, i) {
-                        if (_loadingMore && i == 0) {
+                        if (i == _msgs.length) {
                           return const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
                             child: Center(
@@ -1737,7 +1730,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                           );
                         }
-                        final idx = _loadingMore ? i - 1 : i;
+                        final idx = _msgs.length - 1 - i;
                         final m = _msgs[idx];
                         final own = isMe(m.from);
                         final startsDay =

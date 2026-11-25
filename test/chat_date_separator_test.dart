@@ -146,7 +146,7 @@ void main() {
     service.older = Completer<List<ChatMessage>>();
     await showChat(tester);
     final list = tester.widget<ListView>(find.byType(ListView));
-    list.controller!.jumpTo(0);
+    list.controller!.jumpTo(list.controller!.position.maxScrollExtent);
     await tester.pump();
     expect(service.offsets, [0, 64]);
     expect(find.text('20 ноября'), findsOneWidget);
@@ -155,7 +155,7 @@ void main() {
       message('Earlier same day', DateTime(year, 11, 20, 0, 1)),
     ]);
     await tester.pumpAndSettle();
-    list.controller!.jumpTo(0);
+    list.controller!.jumpTo(list.controller!.position.maxScrollExtent);
     await tester.pumpAndSettle();
     expect(find.text('19 ноября'), findsOneWidget);
     expect(find.text('20 ноября'), findsOneWidget);

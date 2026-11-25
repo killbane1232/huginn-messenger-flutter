@@ -154,3 +154,5 @@ app.*.symbols
 **/*.so
 **/test_dir/*
 /native/
+/macos/Frameworks/
+/ios/Frameworks/

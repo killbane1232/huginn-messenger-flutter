@@ -6,10 +6,15 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04
     environment: AndroidEnv
+    outputs:
+      version: ${{ steps.version.outputs.name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +103,15 @@ jobs:
           --build-number="${{ steps.version.outputs.code }}"
 
       - name: Build Flutter Linux app
-        run: flutter build linux --release
+        run: >-
+          flutter build linux --release
+          --build-name="${{ steps.version.outputs.name }}"
+          --build-number="${{ steps.version.outputs.code }}"
+
+      - name: Package Linux installer
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+        run: bash scripts/package-linux.sh "$VERSION" x64
 
       - name: Rename APK
         run: |
@@ -117,3 +130,74 @@ jobs:
         with:
           name: huginn-messenger-linux
           path: build/linux/x64/release/bundle
+
+      - name: Upload release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-android
+          path: |
+            huginn-messenger-*.apk
+            build/packages/*.deb
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.6'
+          cache: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Build macOS app
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          if ! command -v pod >/dev/null; then brew install cocoapods; fi
+          flutter pub get
+          scripts/build-apple-core.sh macos
+          # Apple bundle versions accept only the numeric SemVer core.
+          flutter build macos --release --build-name="${VERSION%%[-+]*}" --build-number="$BUILD_NUMBER"
+      - name: Package macOS installer
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bash scripts/package-macos.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: build/packages/*.pkg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: packages
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mapfile -d '' packages < <(find packages -type f \( -name '*.apk' -o -name '*.deb' -o -name '*.pkg' \) -print0)
+          [[ ${#packages[@]} -eq 3 ]] || { echo "Expected APK, DEB and PKG" >&2; exit 1; }
+          flags=()
+          version="${RELEASE_TAG#v}"
+          [[ "${version%%+*}" != *-* ]] || flags+=(--prerelease)
+          # Publish only once all three assets have been uploaded successfully.
+          gh release create "$RELEASE_TAG" "${packages[@]}" --verify-tag --draft \
+            --title "Huginn $RELEASE_TAG" --generate-notes "${flags[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false

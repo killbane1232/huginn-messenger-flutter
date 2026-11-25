@@ -3,8 +3,20 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 DynamicLibrary _load() {
-  if (Platform.isMacOS || Platform.isIOS) {
-    return DynamicLibrary.open('huginn_messenger.framework/huginn_messenger');
+  if (Platform.isIOS) {
+    // The Go c-archive is statically linked into the iOS runner.
+    return DynamicLibrary.process();
+  }
+  if (Platform.isMacOS) {
+    // Also allow native Flutter tests to load the freshly built framework.
+    final override = Platform.environment['HUGINN_LIBRARY_PATH'];
+    if (override != null && override.isNotEmpty) {
+      return DynamicLibrary.open(override);
+    }
+    final contents = File(Platform.resolvedExecutable).parent.parent.path;
+    return DynamicLibrary.open(
+      '$contents/Frameworks/huginn_messenger.framework/huginn_messenger',
+    );
   }
   if (Platform.isAndroid || Platform.isLinux) {
     return DynamicLibrary.open('libhuginn_messenger.so');

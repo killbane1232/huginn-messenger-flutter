@@ -8,6 +8,7 @@ import 'huginn_messenger.dart';
 import 'src/services/platform_service.dart';
 import 'src/services/notification_service.dart';
 import 'src/widgets/downloads_screen.dart';
+import 'src/widgets/app_updates_section.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -141,6 +142,7 @@ class _HuginnAppState extends State<HuginnApp> {
   void _handleNotificationTap(String chatId) {
     final value = chatId.trim();
     if (value.isEmpty) return;
+    unawaited(PlatformService.showMainWindow());
     _pendingNotificationChatId = value;
     _scheduleNotificationNavigation();
   }
@@ -228,9 +230,13 @@ class _HuginnAppState extends State<HuginnApp> {
 
   Future<void> _initPlatformServices() async {
     try {
-      final initialChatId = await NotificationService.init(
+      final initialization = NotificationService.init(
         onNotificationTap: _handleNotificationTap,
-      ).timeout(const Duration(seconds: 8));
+      );
+      // A macOS permission prompt must wait for the user's decision.
+      final initialChatId = Platform.isMacOS
+          ? await initialization
+          : await initialization.timeout(const Duration(seconds: 8));
       if (!mounted) return;
       if (initialChatId != null) {
         _pendingNotificationChatId = initialChatId;
@@ -250,7 +256,7 @@ class _HuginnAppState extends State<HuginnApp> {
     try {
       await PlatformService.init(_service).timeout(const Duration(seconds: 8));
     } catch (error, stackTrace) {
-      debugPrint('Failed to initialize Android platform services: $error');
+      debugPrint('Failed to initialize platform services: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
   }
@@ -261,8 +267,10 @@ class _HuginnAppState extends State<HuginnApp> {
       if (!mounted) return;
       _scaffoldMessengerKey.currentState?.showSnackBar(
         SnackBar(
-          content: const Text(
-            'Message notifications are disabled in Android settings.',
+          content: Text(
+            Platform.isMacOS
+                ? 'Message notifications are disabled in macOS System Settings.'
+                : 'Message notifications are disabled in Android settings.',
           ),
           duration: const Duration(seconds: 12),
           action: SnackBarAction(
@@ -2803,6 +2811,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          if (Platform.isMacOS) ...[
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.notifications_outlined),
+              title: const Text('Notification settings'),
+              subtitle: const Text('Manage alerts and sounds in System Settings'),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: PlatformService.openNotificationSettings,
+            ),
+            const SizedBox(height: 24),
+          ],
           _sectionHeader('Relogin', Icons.key, colorScheme),
           const SizedBox(height: 8),
           Row(
@@ -2833,6 +2852,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               label: const Text('Scan relogin QR code'),
             ),
           ),
+          const SizedBox(height: 32),
+          const AppUpdatesSection(),
           const SizedBox(height: 32),
           FilledButton.icon(
             onPressed: _save,

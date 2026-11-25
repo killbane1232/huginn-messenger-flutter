@@ -48,6 +48,42 @@ class MainActivity : FlutterActivity() {
                     val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                     result.success("${dir.absolutePath}/Huginn")
                 }
+                "installUpdate" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("INVALID_ARG", "path is required", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val file = File(path).canonicalFile
+                        if (!file.isFile || file.extension != "apk" ||
+                            !file.path.startsWith(cacheDir.canonicalPath + File.separator)) {
+                            result.error("INVALID_PACKAGE", "Expected an APK in the app cache", null)
+                            return@setMethodCallHandler
+                        }
+                        val archive = packageManager.getPackageArchiveInfo(file.path, 0)
+                        if (archive?.packageName != packageName) {
+                            result.error("INVALID_PACKAGE", "The APK is not a Huginn update", null)
+                            return@setMethodCallHandler
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            !packageManager.canRequestPackageInstalls()) {
+                            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = Uri.parse("package:$packageName")
+                            })
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+                        startActivity(Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        })
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("INSTALL_FAILED", e.message, null)
+                    }
+                }
                 "openFile" -> {
                     val path = call.argument<String>("path")
                     if (path == null) {

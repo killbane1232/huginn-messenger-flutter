@@ -164,7 +164,7 @@ class MessengerService {
   }
 
   Future<String> _defaultDbPath() async {
-    if (Platform.isAndroid || Platform.isIOS) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       final dir = await getApplicationDocumentsDirectory();
       return '${dir.path}/huginn.db';
     }

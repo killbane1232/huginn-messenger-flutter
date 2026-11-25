@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ "$(uname -s)" == Darwin ]]; then
+  exec "$(cd "$(dirname "$0")" && pwd)/scripts/build-apple.sh" "$@"
+fi
+
 export PATH="/usr/local/flutter/bin:$PATH"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

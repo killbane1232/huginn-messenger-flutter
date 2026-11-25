@@ -11,6 +11,7 @@ import 'src/widgets/downloads_screen.dart';
 import 'src/widgets/app_updates_section.dart';
 import 'src/widgets/sticker_picker.dart';
 import 'src/widgets/muninn_ice_dialog.dart';
+import 'src/widgets/muninn_connection_indicator.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -303,7 +304,20 @@ class _HuginnAppState extends State<HuginnApp> {
       ),
       themeMode: ThemeMode.system,
       home: _loading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? Scaffold(
+              body: SafeArea(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      MuninnConnectionIndicator(service: _service),
+                    ],
+                  ),
+                ),
+              ),
+            )
           : _error != null
           ? Scaffold(
               appBar: AppBar(title: const Text('Huginn')),
@@ -431,6 +445,7 @@ class _FirstLoginScreenState extends State<FirstLoginScreen> {
                 children: [
                   Icon(Icons.hub, size: 72, color: colorScheme.primary),
                   const SizedBox(height: 20),
+                  MuninnConnectionIndicator(service: widget.service),
                   Text(
                     'Welcome to Huginn',
                     style: Theme.of(context).textTheme.headlineSmall,
@@ -701,6 +716,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Huginn Messenger'),
+        bottom: MuninnConnectionIndicator(service: widget.service),
         centerTitle: true,
         actions: [
           DownloadsButton(service: widget.service),
@@ -721,32 +737,35 @@ class _HomeScreenState extends State<HomeScreen> {
         icon: const Icon(Icons.group_add),
         label: const Text('New group'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: 'Search peers or groups (3+ characters)...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search peers or groups (3+ characters)...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  filled: true,
+                  fillColor: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.4,
+                  ),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.4,
-                ),
+                onChanged: _search,
               ),
-              onChanged: _search,
             ),
-          ),
-          Expanded(child: _combinedList(theme, colorScheme)),
-        ],
+            Expanded(child: _combinedList(theme, colorScheme)),
+          ],
+        ),
       ),
     );
   }
@@ -1678,6 +1697,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         centerTitle: false,
+        bottom: MuninnConnectionIndicator(service: widget.service),
         actions: [
           DownloadsButton(service: widget.service),
           if (widget.isGroup)
@@ -1688,40 +1708,45 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _msgs.isEmpty
-                ? _emptyChat(theme)
-                : ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    itemCount: _msgs.length + (_loadingMore ? 1 : 0),
-                    itemBuilder: (_, i) {
-                      if (_loadingMore && i == 0) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Center(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _msgs.isEmpty
+                  ? _emptyChat(theme)
+                  : ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      itemCount: _msgs.length + (_loadingMore ? 1 : 0),
+                      itemBuilder: (_, i) {
+                        if (_loadingMore && i == 0) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
                             ),
-                          ),
-                        );
-                      }
-                      final idx = _loadingMore ? i - 1 : i;
-                      final m = _msgs[idx];
-                      final own = isMe(m.from);
-                      return _interactiveMessage(m, own, theme, colorScheme);
-                    },
-                  ),
-          ),
-          if (_attachedFiles.isNotEmpty) _attachedFilesBar(colorScheme),
-          _inputBar(colorScheme),
-        ],
+                          );
+                        }
+                        final idx = _loadingMore ? i - 1 : i;
+                        final m = _msgs[idx];
+                        final own = isMe(m.from);
+                        return _interactiveMessage(m, own, theme, colorScheme);
+                      },
+                    ),
+            ),
+            if (_attachedFiles.isNotEmpty) _attachedFilesBar(colorScheme),
+            _inputBar(colorScheme),
+          ],
+        ),
       ),
     );
   }
@@ -2400,153 +2425,159 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _sectionHeader('Account', Icons.person, colorScheme),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _uCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Username',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _ttl,
-            decoration: const InputDecoration(
-              labelText: 'Chunk TTL',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(value: '1d', child: Text('1 day')),
-              DropdownMenuItem(value: '1w', child: Text('1 week')),
-              DropdownMenuItem(value: '1m', child: Text('1 month')),
-            ],
-            onChanged: (v) => setState(() => _ttl = v!),
-          ),
-          const SizedBox(height: 24),
-          _sectionHeader('Muninn servers', Icons.dns_outlined, colorScheme),
-          const SizedBox(height: 8),
-          const Text(
-            'Huginn selects the fastest available server at startup and when '
-            'reconnecting. Save to apply changes.',
-          ),
-          const SizedBox(height: 8),
-          for (final server in _servers)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                server == _activeServer
-                    ? Icons.check_circle_outline
-                    : Icons.dns_outlined,
-              ),
-              title: Text(server),
-              onTap: () => _editServer(server),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (server == _activeServer) const Text('Active server'),
-                  Text(
-                    'STUN: ${_iceProfiles[server]?.stunUrls.length ?? 0} · '
-                    'TURN: ${_iceProfiles[server]?.turnUrls.length ?? 0}',
-                  ),
-                ],
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Edit server',
-                    icon: const Icon(Icons.tune),
-                    onPressed: () => _editServer(server),
-                  ),
-                  IconButton(
-                    tooltip: 'Remove server',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () => setState(() {
-                      _servers.remove(server);
-                      _iceProfiles.remove(server);
-                      _serverError = null;
-                    }),
-                  ),
-                ],
+      appBar: AppBar(
+        title: const Text('Settings'),
+        bottom: MuninnConnectionIndicator(service: widget.service),
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _sectionHeader('Account', Icons.person, colorScheme),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _uCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Username',
+                border: OutlineInputBorder(),
               ),
             ),
-          TextField(
-            controller: _serverCtrl,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: InputDecoration(
-              labelText: 'New Muninn server',
-              hintText: 'https://muninn.example.org',
-              errorText: _serverError,
-              errorMaxLines: 3,
-              border: const OutlineInputBorder(),
-            ),
-            onSubmitted: (_) => _addServer(),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _addServer,
-            icon: const Icon(Icons.add),
-            label: const Text('Add server'),
-          ),
-          const SizedBox(height: 24),
-          if (Platform.isMacOS) ...[
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.notifications_outlined),
-              title: const Text('Notification settings'),
-              subtitle: const Text(
-                'Manage alerts and sounds in System Settings',
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _ttl,
+              decoration: const InputDecoration(
+                labelText: 'Chunk TTL',
+                border: OutlineInputBorder(),
               ),
-              trailing: const Icon(Icons.open_in_new),
-              onTap: PlatformService.openNotificationSettings,
+              items: const [
+                DropdownMenuItem(value: '1d', child: Text('1 day')),
+                DropdownMenuItem(value: '1w', child: Text('1 week')),
+                DropdownMenuItem(value: '1m', child: Text('1 month')),
+              ],
+              onChanged: (v) => setState(() => _ttl = v!),
             ),
             const SizedBox(height: 24),
-          ],
-          _sectionHeader('Relogin', Icons.key, colorScheme),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _generateReloginKey,
-                  icon: const Icon(Icons.key, size: 18),
-                  label: const Text('Generate key'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _applyReloginKey,
-                  icon: const Icon(Icons.vpn_key, size: 18),
-                  label: const Text('Apply key'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _scanReloginKey,
-              icon: const Icon(Icons.qr_code_scanner, size: 18),
-              label: const Text('Scan relogin QR code'),
+            _sectionHeader('Muninn servers', Icons.dns_outlined, colorScheme),
+            const SizedBox(height: 8),
+            const Text(
+              'Huginn selects the fastest available server at startup and when '
+              'reconnecting. Save to apply changes.',
             ),
-          ),
-          const SizedBox(height: 32),
-          const AppUpdatesSection(),
-          const SizedBox(height: 32),
-          FilledButton.icon(
-            onPressed: _save,
-            icon: const Icon(Icons.save),
-            label: const Text('Save'),
-          ),
-        ],
+            const SizedBox(height: 8),
+            for (final server in _servers)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  server == _activeServer
+                      ? Icons.check_circle_outline
+                      : Icons.dns_outlined,
+                ),
+                title: Text(server),
+                onTap: () => _editServer(server),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (server == _activeServer) const Text('Active server'),
+                    Text(
+                      'STUN: ${_iceProfiles[server]?.stunUrls.length ?? 0} · '
+                      'TURN: ${_iceProfiles[server]?.turnUrls.length ?? 0}',
+                    ),
+                  ],
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Edit server',
+                      icon: const Icon(Icons.tune),
+                      onPressed: () => _editServer(server),
+                    ),
+                    IconButton(
+                      tooltip: 'Remove server',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => setState(() {
+                        _servers.remove(server);
+                        _iceProfiles.remove(server);
+                        _serverError = null;
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            TextField(
+              controller: _serverCtrl,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: 'New Muninn server',
+                hintText: 'https://muninn.example.org',
+                errorText: _serverError,
+                errorMaxLines: 3,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _addServer(),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _addServer,
+              icon: const Icon(Icons.add),
+              label: const Text('Add server'),
+            ),
+            const SizedBox(height: 24),
+            if (Platform.isMacOS) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.notifications_outlined),
+                title: const Text('Notification settings'),
+                subtitle: const Text(
+                  'Manage alerts and sounds in System Settings',
+                ),
+                trailing: const Icon(Icons.open_in_new),
+                onTap: PlatformService.openNotificationSettings,
+              ),
+              const SizedBox(height: 24),
+            ],
+            _sectionHeader('Relogin', Icons.key, colorScheme),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _generateReloginKey,
+                    icon: const Icon(Icons.key, size: 18),
+                    label: const Text('Generate key'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _applyReloginKey,
+                    icon: const Icon(Icons.vpn_key, size: 18),
+                    label: const Text('Apply key'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _scanReloginKey,
+                icon: const Icon(Icons.qr_code_scanner, size: 18),
+                label: const Text('Scan relogin QR code'),
+              ),
+            ),
+            const SizedBox(height: 32),
+            const AppUpdatesSection(),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              onPressed: _save,
+              icon: const Icon(Icons.save),
+              label: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2609,37 +2640,40 @@ class _ReloginQrScannerScreenState extends State<_ReloginQrScannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Scan relogin QR code')),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
-          IgnorePointer(
-            child: Center(
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 3),
-                  borderRadius: BorderRadius.circular(20),
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            MobileScanner(controller: _controller, onDetect: _onDetect),
+            IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 260,
+                  height: 260,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white, width: 3),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
               ),
             ),
-          ),
-          const Positioned(
-            left: 24,
-            right: 24,
-            bottom: 32,
-            child: Text(
-              'Point the camera at a Huginn relogin QR code',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+            const Positioned(
+              left: 24,
+              right: 24,
+              bottom: 32,
+              child: Text(
+                'Point the camera at a Huginn relogin QR code',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

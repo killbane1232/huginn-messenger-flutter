@@ -9,6 +9,7 @@ import 'src/services/platform_service.dart';
 import 'src/services/notification_service.dart';
 import 'src/widgets/downloads_screen.dart';
 import 'src/widgets/app_updates_section.dart';
+import 'src/widgets/sticker_picker.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -1100,7 +1101,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-enum _MessageAction { reply, forward }
+enum _MessageAction { reply, forward, createSticker }
 
 class _ForwardTarget {
   final String id;
@@ -1115,343 +1116,6 @@ class _ForwardTarget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  static const _stickerCategories = <String, List<String>>{
-    'Радость': [
-      '(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧',
-      '٩(◕‿◕｡)۶',
-      'ヽ(•‿•)ノ',
-      '(*^ω^) (´∀｀*)',
-      '(o^▽^o)',
-      '(⌒▽⌒)☆',
-      '<(￣︶￣)>',
-      '(*⌒―⌒*)))',
-      'ヽ(・∀・)ﾉ',
-      '(´｡• ω •｡`)',
-      '(￣ω￣) ｀;:',
-      ';｀;･(゜ε゜ )',
-      '(o･ω･o)',
-      '(＠＾－＾)',
-      'ヽ(*・ω・)ﾉ',
-      '(o_ _)ﾉ彡☆',
-      '(^人^)',
-      '(o´▽`o)',
-      '(*´▽`*)',
-      '｡ﾟ( ﾟ^∀^ﾟ)ﾟ｡',
-      '(´ω｀)',
-      '(☆▽☆)',
-      '(≧◡≦)',
-      '(o´∀｀o)',
-      '(´• ω •`)',
-      '(＾▽＾)',
-      '(⌒ω⌒)',
-      '∑d(ﾟ∀ﾟd)',
-      '╰(▔∀▔)╯',
-      '(─‿‿─)',
-      '(*^‿^*)',
-      'ヽ(o^―^o)ﾉ',
-      '(✯◡✯)',
-      '(◕‿◕)',
-      '(*≧ω≦*)',
-      '(((o(*ﾟ▽ﾟ*)o)))',
-      '(⌒‿⌒)',
-      '＼(≧▽≦)／',
-      '⌒(o＾▽＾o)ノ ☆',
-      '～(`▽^人)',
-      '(*ﾟ▽ﾟ*)',
-      '(✧∀✧)',
-      '(✧ω✧)',
-      'ヽ(*⌒▽⌒*)ﾉ',
-      '(´｡• ᵕ •｡`)',
-      '( ´ ▽ ` )',
-      '(￣▽￣)',
-      '╰(*´︶`*)╯',
-      'ヽ(>∀<☆)ノ',
-      'o(≧▽≦)o',
-      '(☆ω☆)',
-      '(っ˘ω˘ς )',
-      '＼(￣▽￣)／',
-      '(*¯︶¯*)',
-      '＼(＾▽＾)／',
-      '٩(◕‿◕)۶',
-      '(o˘◡˘o)',
-    ],
-    'Любовь': [
-      '(づ｡◕‿‿◕｡)づ',
-      '(｡♥‿♥｡)',
-      '(ﾉ´з｀)ノ',
-      '(♡μ_μ)',
-      '(*^^*)♡'
-          '(♡-_-♡)',
-      '(￣ε￣＠)',
-      'ヽ(♡‿♡)ノ ( ´∀｀)ノ～ ♡',
-      '(─‿‿─)♡',
-      '(´｡• ᵕ •｡`)♡',
-      '(*♡∀♡)',
-      '(｡・//ε//・｡)',
-      '(´ω｀♡)',
-      '( ◡‿◡ ♡)',
-      '(◕‿◕)♡',
-      '(/▽＼*)｡o○♡',
-      '(ღ˘⌣˘ღ)',
-      '(♡ﾟ▽ﾟ♡)',
-      '♡(。-ω-)',
-      '♡ ～(`▽^人)',
-      '(´• ω •`)',
-      '♡',
-      '(´ε｀ )♡',
-      '(´｡• ω •｡`)',
-      '♡',
-      '( ´ ▽ ` ).｡ｏ♡',
-      '╰(*´︶`*)╯♡',
-      '(*˘︶˘*).｡.:*♡',
-      '(♡˙︶˙♡)',
-      '♡＼(￣▽￣)／♡',
-      '(≧◡≦)',
-      '♡',
-      '(⌒▽⌒)♡',
-      '(*¯ ³¯*)♡',
-      '(っ˘з(˘⌣˘ )',
-      '♡',
-      '♡ (˘▽˘>ԅ( ˘⌣˘)',
-      '( ˘⌣˘)♡(˘⌣˘ )',
-      '(/^-^(^ ^*)/',
-      '♡',
-    ],
-    'Смущение': [
-      '(⌒_⌒;)',
-      '(o^ ^o)',
-      '(*/ω＼)',
-      '(*/。＼)',
-      '(*/_＼)',
-      '(*ﾉωﾉ)',
-      '(o-_-o)',
-      '(*μ_μ)',
-      '( ◡‿◡ *)',
-      '(ᵔ.ᵔ)',
-      '(*ﾉ∀`*)',
-      '(//▽//)',
-      '(//ω//)',
-      '(ノ*ﾟ▽ﾟ*)',
-      '(*^.^*)',
-      '(*ﾉ▽ﾉ)',
-      '(￣▽￣*)ゞ',
-      '(⁄ ⁄•⁄ω⁄•⁄ ⁄)',
-      '(*/▽＼*)',
-    ],
-    'Недовольство': [
-      '(＃＞＜)',
-      '(；⌣̀_⌣́)',
-      '☆ｏ(＞＜；)○',
-      '(￣ ￣|||)',
-      '(；￣Д￣)',
-      '(￣□￣」)',
-      '(＃￣0￣)',
-      '(＃￣ω￣)',
-      '(￢_￢;)',
-      '(＞ｍ＜)',
-      '(」゜ロ゜)」',
-      '(〃＞＿＜;〃)',
-      '(＾＾＃)',
-      '(︶︹︺)',
-      '(￣ヘ￣)',
-      '<(￣ ﹌ ￣)>',
-      '(￣︿￣)',
-      '(＞﹏＜)',
-      '(--_--)',
-      '凸(￣ヘ￣)',
-      'ヾ( ￣O￣)ツ',
-      '(⇀‸↼‶)',
-      'o(>< )o',
-    ],
-    'Злость': [
-      '(╯°益°)╯彡┻━┻',
-      '(ง •̀_•́)ง',
-      'ಠ_ಠ',
-      '(＃`Д´)',
-      '(╬ಠ益ಠ)'
-          '(｀皿´＃)',
-      '(｀ω´)',
-      'ヽ( `д´*)ノ',
-      '(・｀ω´・)',
-      '(｀ー´)',
-      'ヽ(｀⌒´メ)ノ',
-      '凸(｀△´＃)',
-      '(｀ε´)',
-      'ψ(｀∇´)ψ',
-      'ヾ(｀ヘ´)ﾉﾞ',
-      'ヽ(‵﹏′)ノ',
-      '(ﾒ｀ﾛ´)',
-      '(╬｀益´)',
-      '┌∩┐(◣_◢)┌∩┐',
-      '凸(｀ﾛ´)凸',
-      'Σ(▼□▼メ)',
-      '(°ㅂ°╬)',
-      'ψ(▼へ▼メ)～→',
-      '(ノ°益°)ノ',
-      '(҂ `з´ )',
-      '(‡▼益▼)',
-      '(҂｀ﾛ´)凸 ((╬◣﹏◢))',
-      '٩(╬ʘ益ʘ╬)۶',
-      '(╬ Ò﹏Ó)',
-      '＼＼٩(๑`^´๑)۶／／',
-    ],
-    'Удивление': [
-      '(⊙_⊙)',
-      '(°ロ°) !',
-      'Σ(°△°|||)',
-      '(☉_☉)'
-          '(￣ω￣;)',
-      'σ(￣、￣〃)',
-      '(￣～￣;)',
-      '(-_-;)・・・',
-      '┐(`～`;)┌',
-      '(・_・ヾ',
-      '(〃￣ω￣〃ゞ',
-      '┐(￣ヘ￣;)┌',
-      '(・_・;)',
-      '(￣_￣)・・・',
-      '╮(￣ω￣;)╭',
-      '(￣.￣;)',
-      '(＠_＠)',
-      '(・・;)ゞ',
-      'Σ(￣。￣ﾉ)',
-      '(・・ )?',
-      '(•ิ_•ิ)?',
-      '(◎ ◎)ゞ',
-      '(ーー;)',
-      'w(ﾟｏﾟ)w ヽ(ﾟ〇ﾟ)ﾉ Σ(O_O) Σ(ﾟロﾟ)',
-      '(⊙_⊙)',
-      '(o_O)',
-      '(O_O;)',
-      '(O.O)',
-      '(ﾟロﾟ)',
-      '! (o_O) !',
-      '(□_□)',
-      'Σ(□_□)',
-      '∑(O_O;)',
-    ],
-    'Сомнение': [
-      '(￢_￢)',
-      '(→_→)',
-      '(￢ ￢)',
-      '(￢‿￢ )',
-      '(¬_¬ )',
-      '(←_←)',
-      '(¬ ¬ )',
-      '(¬‿¬ )',
-      '(↼_↼)',
-      '(⇀_⇀)',
-    ],
-    'Приветствие': [
-      '(*・ω・)ﾉ',
-      '(￣▽￣)ノ',
-      '(ﾟ▽ﾟ)/',
-      '(*´∀｀)ﾉ',
-      '(^-^*)/',
-      '(＠´ー`)ﾉﾞ',
-      '(´• ω •`)ﾉ',
-      '(ﾟ∀ﾟ)ﾉﾞ',
-      'ヾ(*`▽`*)',
-      '＼(⌒▽⌒)',
-      'ヾ(☆▽☆)',
-      '( ´ ▽ ` )ﾉ',
-      '(^０^)ノ',
-      '~ヾ(・ω・)',
-      '(・∀・)ノ',
-      'ヾ(^ω^*)',
-      '(*ﾟｰﾟ)ﾉ',
-      '(・_・)ノ',
-      '(o´ω`o)ﾉ',
-      'ヾ(☆\'∀\'☆)',
-      '(￣ω￣)/',
-      '(´ω｀)ノﾞ',
-      '(⌒ω⌒)ﾉ',
-      '(o^ ^o)/',
-      '(≧▽≦)/',
-      '(✧∀✧)/',
-      '(o´▽`o)ﾉ',
-      '(￣▽￣)/',
-    ],
-    'Грусть': [
-      '(ಥ﹏ಥ)',
-      '(｡•́︿•̀｡)',
-      '(╥_╥)',
-      '(っ˘̩╭╮˘̩)っ'
-          '(ノ_<。)',
-      '(*-_-)',
-      '(´-ω-｀)',
-      '.･ﾟﾟ･(／ω＼)･ﾟﾟ･.',
-      '(μ_μ)',
-      '(ﾉД`)',
-      '(-ω-、)',
-      '。゜゜(´Ｏ｀)°゜。',
-      'o(TヘTo)',
-      '(；ω；)',
-      '(｡╯3╰｡)',
-      '｡･ﾟﾟ*(>д<)*ﾟﾟ･｡',
-      '( ﾟ，_ゝ｀)',
-      '(个_个)',
-      '(╯︵╰,)',
-      '｡･ﾟ(ﾟ><ﾟ)ﾟ･｡',
-      '( ╥ω╥ )',
-      '(╯_╰)',
-      '(╥_╥)',
-      '.｡･ﾟﾟ･(＞_＜)･ﾟﾟ･｡.',
-      '(／ˍ・、)',
-      '(ノ_<、)',
-      '(╥﹏╥)',
-      '｡ﾟ(｡ﾉωヽ｡)ﾟ｡',
-      '(つω`*)',
-      '(｡T ω T｡)',
-      '(ﾉω･､)',
-      '･ﾟ･(｡>ω<｡)･ﾟ･',
-      '(T_T)',
-      '(>_<)',
-      '(Ｔ▽Ｔ)',
-      '｡ﾟ･ (>﹏<) ･ﾟ｡',
-      'o(〒﹏〒)o',
-    ],
-    'Спокойствие': [
-      '┬─┬ノ( º _ ºノ)',
-      '¯\\_(ツ)_/¯',
-      '(⌐■_■)',
-      'ʕ•ᴥ•ʔ',
-      '◯０o。(ー。ー)y~~',
-      'ヽ(ー_ー )ノ',
-      'ヽ(´ー｀)┌',
-      '┐(‘～` )┌',
-      'ヽ(　￣д￣)ノ',
-      '┐(￣ヘ￣)┌',
-      'ヽ(￣～￣　)ノ',
-      '╮(￣_￣)╭',
-      'ヽ(ˇヘˇ)ノ',
-      '┐(￣～￣)┌',
-      '┐(︶▽︶)┌',
-      '╮(￣～￣)╭',
-      '¯＼_(ツ)_/¯',
-      '┐(´д｀)┌',
-      '╮(︶︿︶)╭',
-      '┐(￣∀￣)┌',
-      '┐( ˘ ､ ˘ )┌',
-    ],
-    'Секрет': [
-      '''ЗАПУСКАЕМ
-░ГУСЯ░▄▀▀▀▄░РАБОТЯГИ░░
-▄███▀░◐░░░▌░░░░░░░
-░░░░▌░░░░░▐░░░░░░░
-░░░░▐░░░░░▐░░░░░░░
-░░░░▌░░░░░▐▄▄░░░░░
-░░░░▌░░░░▄▀▒▒▀▀▀▀▄
-░░░▐░░░░▐▒▒▒▒▒▒▒▒▀▀▄
-░░░▐░░░░▐▄▒▒▒▒▒▒▒▒▒▒▀▄
-░░░░▀▄░░░░▀▄▒▒▒▒▒▒▒▒▒▒▀▄
-░░░░░░▀▄▄▄▄▄█▄▄▄▄▄▄▄▄▄▄▄▀▄
-░░░░░░░░░░░▌▌░▌▌░░░░░
-░░░░░░░░░░░▌▌░▌▌░░░░░
-░░░░░░░░░▄▄▌▌▄▌▌░░░░░''',
-    ],
-  };
-
   final _msgCtrl = TextEditingController();
   final _msgFocus = FocusNode();
   final _scrollCtrl = ScrollController();
@@ -1715,19 +1379,16 @@ class _ChatScreenState extends State<ChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> _showDesktopMessageMenu(
-    ChatMessage message,
-    TapDownDetails details,
-  ) async {
+  Future<void> _showMessageMenu(ChatMessage message, Offset position) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final action = await showMenu<_MessageAction>(
       context: context,
       position: RelativeRect.fromRect(
-        details.globalPosition & const Size(1, 1),
+        overlay.globalToLocal(position) & const Size(1, 1),
         Offset.zero & overlay.size,
       ),
-      items: const [
-        PopupMenuItem(
+      items: [
+        const PopupMenuItem(
           value: _MessageAction.reply,
           child: ListTile(
             contentPadding: EdgeInsets.zero,
@@ -1735,7 +1396,7 @@ class _ChatScreenState extends State<ChatScreen> {
             title: Text('Reply'),
           ),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: _MessageAction.forward,
           child: ListTile(
             contentPadding: EdgeInsets.zero,
@@ -1743,6 +1404,15 @@ class _ChatScreenState extends State<ChatScreen> {
             title: Text('Forward'),
           ),
         ),
+        if (FormattedMessageText.parse(message.text).body.trim().isNotEmpty)
+          const PopupMenuItem(
+            value: _MessageAction.createSticker,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.add_reaction_outlined),
+              title: Text('Создать стикер из сообщения'),
+            ),
+          ),
       ],
     );
     if (!mounted) return;
@@ -1751,45 +1421,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _startReply(message);
       case _MessageAction.forward:
         await _forwardMessage(message);
+      case _MessageAction.createSticker:
+        await _createStickerFromMessage(message);
       case null:
         break;
     }
-  }
-
-  Widget _stickerGrid(BuildContext sheetContext, List<String> stickers) {
-    final colorScheme = Theme.of(sheetContext).colorScheme;
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 220,
-        mainAxisExtent: 72,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-      ),
-      itemCount: stickers.length,
-      itemBuilder: (_, index) {
-        final sticker = stickers[index];
-        return OutlinedButton(
-          onPressed: () {
-            if (_sendSticker(sticker)) {
-              Navigator.of(sheetContext).pop();
-            }
-          },
-          style: OutlinedButton.styleFrom(
-            foregroundColor: colorScheme.onSurface,
-            side: BorderSide(color: colorScheme.outlineVariant),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-          child: Text(
-            sticker,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 18),
-          ),
-        );
-      },
-    );
   }
 
   void _showStickers() {
@@ -1798,43 +1434,16 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: FractionallySizedBox(
-            heightFactor: 0.55,
-            child: DefaultTabController(
-              length: _stickerCategories.length,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                    child: Text(
-                      'Стикеры',
-                      style: Theme.of(sheetContext).textTheme.titleLarge,
-                    ),
-                  ),
-                  TabBar(
-                    isScrollable: true,
-                    tabs: _stickerCategories.keys
-                        .map((category) => Tab(text: category))
-                        .toList(),
-                  ),
-                  Expanded(
-                    child: TabBarView(
-                      children: _stickerCategories.values
-                          .map(
-                            (stickers) => _stickerGrid(sheetContext, stickers),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+      builder: (_) =>
+          StickerPicker(library: widget.service.stickers, onSend: _sendSticker),
+    );
+  }
+
+  Future<void> _createStickerFromMessage(ChatMessage message) async {
+    await showStickerEditor(
+      context: context,
+      library: widget.service.stickers,
+      initialText: FormattedMessageText.parse(message.text).body,
     );
   }
 
@@ -2358,10 +1967,12 @@ class _ChatScreenState extends State<ChatScreen> {
     ColorScheme colorScheme,
   ) {
     Widget child = _messageBubble(message, own, theme, colorScheme);
+    final platform = theme.platform;
 
-    if (Platform.isAndroid) {
+    if (platform == TargetPlatform.android || platform == TargetPlatform.iOS) {
       child = GestureDetector(
-        onLongPress: () => _forwardMessage(message),
+        onLongPressStart: (details) =>
+            _showMessageMenu(message, details.globalPosition),
         child: Dismissible(
           key: ValueKey(
             message.msgId.isNotEmpty
@@ -2383,11 +1994,13 @@ class _ChatScreenState extends State<ChatScreen> {
           child: SizedBox(width: double.infinity, child: child),
         ),
       );
-    } else if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+    } else if (platform == TargetPlatform.linux ||
+        platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.windows) {
       child = GestureDetector(
         behavior: HitTestBehavior.translucent,
         onSecondaryTapDown: (details) =>
-            _showDesktopMessageMenu(message, details),
+            _showMessageMenu(message, details.globalPosition),
         child: child,
       );
     }

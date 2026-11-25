@@ -12,10 +12,15 @@ import '../models/group_chat.dart';
 import '../models/file_download.dart';
 import '../ffi/messenger_bridge.dart' as bridge;
 import 'event_poller.dart';
+import 'sticker_library.dart';
 
 const _uuid = Uuid();
 
 class MessengerService {
+  MessengerService({StickerLibrary? stickers})
+    : stickers = stickers ?? StickerLibrary();
+
+  final StickerLibrary stickers;
   int _handle = 0;
   String? _currentUserId;
   String? _currentUsername;
@@ -172,6 +177,7 @@ class MessengerService {
   }
 
   void dispose() {
+    stickers.dispose();
     _pollTimer?.cancel();
     if (_handle > 0) {
       bridge.messengerDestroy(_handle);

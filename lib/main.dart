@@ -10,6 +10,7 @@ import 'src/services/notification_service.dart';
 import 'src/widgets/downloads_screen.dart';
 import 'src/widgets/app_updates_section.dart';
 import 'src/widgets/sticker_picker.dart';
+import 'src/widgets/muninn_ice_dialog.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -2176,11 +2177,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _uCtrl,
-      _mCtrl,
-      _turnAddrCtrl,
-      _turnUserCtrl,
-      _turnPassCtrl;
+  late TextEditingController _uCtrl;
+  final _serverCtrl = TextEditingController();
+  late List<String> _servers;
+  late Map<String, MuninnIceConfig> _iceProfiles;
+  String _activeServer = '';
+  String? _serverError;
   String _ttl = '1w';
 
   @override
@@ -2188,20 +2190,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     final c = widget.service.config;
     _uCtrl = TextEditingController(text: c.username);
-    _mCtrl = TextEditingController(text: c.muninnAddr);
-    _turnAddrCtrl = TextEditingController(text: c.turnAddr);
-    _turnUserCtrl = TextEditingController(text: c.turnUser);
-    _turnPassCtrl = TextEditingController(text: c.turnPass);
+    _servers = c.allMuninnServers;
+    _iceProfiles = Map.of(c.muninnIce);
+    _activeServer = c.muninnAddr;
     _ttl = c.chunkTtl;
   }
 
   @override
   void dispose() {
     _uCtrl.dispose();
-    _mCtrl.dispose();
-    _turnAddrCtrl.dispose();
-    _turnUserCtrl.dispose();
-    _turnPassCtrl.dispose();
+    _serverCtrl.dispose();
     super.dispose();
   }
 
@@ -2326,27 +2324,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _save() {
-    final username = _uCtrl.text.trim();
-    if (!AppConfig.isValidMuninnAddr(_mCtrl.text)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid http(s) Muninn server URL'),
-        ),
-      );
-      return;
+  bool _addServer() {
+    final address = AppConfig.normalizeMuninnAddr(_serverCtrl.text);
+    String? error;
+    if (!AppConfig.isValidMuninnAddr(address)) {
+      error =
+          'Enter an http(s) URL without a path, credentials, query or fragment';
+    } else if (_servers.contains(address)) {
+      error = 'This server is already in the list';
+    } else if (_servers.length >= AppConfig.maxMuninnServers) {
+      error = 'You can add up to ${AppConfig.maxMuninnServers} servers';
     }
-    final ok = widget.service.saveConfig(
-      AppConfig(
-        username: username,
-        muninnAddr: _mCtrl.text.trim(),
-        chunkTtl: _ttl,
-        turnAddr: _turnAddrCtrl.text.trim(),
-        turnUser: _turnUserCtrl.text.trim(),
-        turnPass: _turnPassCtrl.text.trim(),
+    setState(() {
+      _serverError = error;
+      if (error == null) {
+        _servers.add(address);
+        _serverCtrl.clear();
+      }
+    });
+    return error == null;
+  }
+
+  Future<void> _editServer(String server) async {
+    final result = await showDialog<MuninnServerEdit>(
+      context: context,
+      builder: (_) => MuninnIceDialog(
+        server: server,
+        config: _iceProfiles[server] ?? MuninnIceConfig(),
+        existingServers: _servers,
       ),
     );
+    if (mounted && result != null) {
+      setState(() {
+        _servers[_servers.indexOf(server)] = result.address;
+        _iceProfiles.remove(server);
+        _iceProfiles[result.address] = result.ice;
+        _serverError = null;
+      });
+    }
+  }
+
+  void _save() {
+    if (_serverCtrl.text.trim().isNotEmpty && !_addServer()) return;
+    if (_servers.isEmpty) {
+      setState(() => _serverError = 'Add at least one Muninn server');
+      return;
+    }
+    final current = widget.service.config;
+    final updated = AppConfig(
+      username: _uCtrl.text.trim(),
+      muninnAddr: current.muninnAddr,
+      chunkTtl: _ttl,
+      dbPath: current.dbPath,
+      muninnIce: _iceProfiles,
+    )..setMuninnServers(_servers);
+    final ok = widget.service.saveConfig(updated);
     if (mounted) {
+      if (ok) {
+        final saved = widget.service.config;
+        setState(() {
+          _servers = saved.allMuninnServers;
+          _iceProfiles = Map.of(saved.muninnIce);
+          _activeServer = saved.muninnAddr;
+        });
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(ok ? 'Saved' : 'Failed')));
@@ -2373,14 +2414,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _mCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Muninn server',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _ttl,
             decoration: const InputDecoration(
@@ -2395,33 +2428,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => setState(() => _ttl = v!),
           ),
           const SizedBox(height: 24),
-          _sectionHeader('TURN / STUN', Icons.router, colorScheme),
+          _sectionHeader('Muninn servers', Icons.dns_outlined, colorScheme),
           const SizedBox(height: 8),
-          TextField(
-            controller: _turnAddrCtrl,
-            decoration: const InputDecoration(
-              labelText: 'TURN address',
-              hintText: '192.168.31.250:3478',
-              border: OutlineInputBorder(),
-            ),
+          const Text(
+            'Huginn selects the fastest available server at startup and when '
+            'reconnecting. Save to apply changes.',
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _turnUserCtrl,
-            decoration: const InputDecoration(
-              labelText: 'TURN username',
-              hintText: 'huginn',
-              border: OutlineInputBorder(),
+          for (final server in _servers)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                server == _activeServer
+                    ? Icons.check_circle_outline
+                    : Icons.dns_outlined,
+              ),
+              title: Text(server),
+              onTap: () => _editServer(server),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (server == _activeServer) const Text('Active server'),
+                  Text(
+                    'STUN: ${_iceProfiles[server]?.stunUrls.length ?? 0} · '
+                    'TURN: ${_iceProfiles[server]?.turnUrls.length ?? 0}',
+                  ),
+                ],
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Edit server',
+                    icon: const Icon(Icons.tune),
+                    onPressed: () => _editServer(server),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove server',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => setState(() {
+                      _servers.remove(server);
+                      _iceProfiles.remove(server);
+                      _serverError = null;
+                    }),
+                  ),
+                ],
+              ),
             ),
+          TextField(
+            controller: _serverCtrl,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: InputDecoration(
+              labelText: 'New Muninn server',
+              hintText: 'https://muninn.example.org',
+              errorText: _serverError,
+              errorMaxLines: 3,
+              border: const OutlineInputBorder(),
+            ),
+            onSubmitted: (_) => _addServer(),
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _turnPassCtrl,
-            decoration: const InputDecoration(
-              labelText: 'TURN password',
-              hintText: 'changeme',
-              border: OutlineInputBorder(),
-            ),
+          OutlinedButton.icon(
+            onPressed: _addServer,
+            icon: const Icon(Icons.add),
+            label: const Text('Add server'),
           ),
           const SizedBox(height: 24),
           if (Platform.isMacOS) ...[
@@ -2429,7 +2500,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.notifications_outlined),
               title: const Text('Notification settings'),
-              subtitle: const Text('Manage alerts and sounds in System Settings'),
+              subtitle: const Text(
+                'Manage alerts and sounds in System Settings',
+              ),
               trailing: const Icon(Icons.open_in_new),
               onTap: PlatformService.openNotificationSettings,
             ),

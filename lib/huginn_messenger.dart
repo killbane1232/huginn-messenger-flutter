@@ -5,5 +5,6 @@ export 'src/services/messenger_service.dart';
 export 'src/models/peer.dart';
 export 'src/models/chat_message.dart';
 export 'src/models/config.dart';
+export 'src/models/muninn_ice_config.dart';
 export 'src/models/app_event.dart';
 export 'src/models/group_chat.dart';

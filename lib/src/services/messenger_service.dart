@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/peer.dart';
 import '../models/chat_message.dart';
 import '../models/config.dart';
+import '../models/muninn_ice_config.dart';
 import '../models/app_event.dart';
 import '../models/group_chat.dart';
 import '../models/file_download.dart';
@@ -39,7 +40,11 @@ class MessengerService {
   String? get lastSendError => _lastSendError;
   Stream<AppEvent> get events => _eventCtrl.stream;
   Stream<List<Peer>> get peersStream => _peersCtrl.stream;
-  AppConfig get config => _config;
+  AppConfig get config {
+    if (isReady) _loadConfig();
+    return _config;
+  }
+
   List<Peer> get peers => _lastPeers;
   Map<String, String> get filePaths => _filePaths;
 
@@ -109,13 +114,27 @@ class MessengerService {
     String muninnAddr = '',
     String? dbPath,
     String chunkTtl = '1w',
-    String turnAddr = '',
-    String turnUser = '',
-    String turnPass = '',
+    List<String>? muninnServers,
+    Map<String, MuninnIceConfig>? muninnIce,
   }) async {
     if (isReady) return true;
-    muninnAddr = muninnAddr.trim().replaceFirst(RegExp(r'/+$'), '');
+    muninnAddr = AppConfig.normalizeMuninnAddr(muninnAddr);
     if (muninnAddr.isNotEmpty && !AppConfig.isValidMuninnAddr(muninnAddr)) {
+      return false;
+    }
+    if (muninnServers != null) {
+      final candidates = AppConfig(
+        muninnAddr: muninnAddr,
+        muninnServers: muninnServers,
+      ).allMuninnServers;
+      if (candidates.isEmpty ||
+          candidates.length > AppConfig.maxMuninnServers ||
+          !candidates.every(AppConfig.isValidMuninnAddr)) {
+        return false;
+      }
+    }
+    if (muninnIce != null &&
+        muninnIce.values.any((ice) => ice.validationError != null)) {
       return false;
     }
     username ??= _uuid.v4();
@@ -126,24 +145,34 @@ class MessengerService {
       muninnAddr,
       dbPath,
       chunkTtl,
-      turnAddr: turnAddr,
-      turnUser: turnUser,
-      turnPass: turnPass,
+      muninnServers: muninnServers,
+      muninnIce: muninnIce?.map(
+        (server, ice) => MapEntry(server, ice.toJson()),
+      ),
     );
-    // Empty address asks the core to load SQLite settings. On first launch,
-    // initialize them from the bundled application configuration.
+    // Omitted servers ask the core to load SQLite settings. On first launch,
+    // pass the complete bundled list before selection and registration.
     if (_handle == bridge.messengerMuninnAddressRequired &&
-        muninnAddr.isEmpty) {
+        muninnAddr.isEmpty &&
+        muninnServers == null) {
       try {
         final data = await rootBundle.loadString('assets/config.json');
         final initialConfig = AppConfig.fromJson(
           jsonDecode(data) as Map<String, dynamic>,
         );
-        muninnAddr = initialConfig.muninnAddr.trim().replaceFirst(
-          RegExp(r'/+$'),
-          '',
-        );
-        if (!AppConfig.isValidMuninnAddr(muninnAddr)) return false;
+        final candidates = initialConfig.allMuninnServers;
+        if (candidates.isEmpty ||
+            candidates.length > AppConfig.maxMuninnServers ||
+            !candidates.every(AppConfig.isValidMuninnAddr)) {
+          return false;
+        }
+        initialConfig.setMuninnServers(candidates);
+        muninnAddr = initialConfig.muninnAddr;
+        muninnServers = initialConfig.muninnServers;
+        muninnIce = initialConfig.muninnIce;
+        if (muninnIce.values.any((ice) => ice.validationError != null)) {
+          return false;
+        }
       } catch (_) {
         return false;
       }
@@ -152,17 +181,15 @@ class MessengerService {
         muninnAddr,
         dbPath,
         chunkTtl,
-        turnAddr: turnAddr,
-        turnUser: turnUser,
-        turnPass: turnPass,
+        muninnServers: muninnServers,
+        muninnIce: muninnIce.map(
+          (server, ice) => MapEntry(server, ice.toJson()),
+        ),
       );
     }
     if (_handle <= 0) return false;
     _loadMe();
     _loadConfig();
-    if (_config.username == username) {
-      saveConfig(_config);
-    }
     loadPeers();
     _startPolling();
     return true;
@@ -385,38 +412,53 @@ class MessengerService {
 
   bool saveConfig(AppConfig newConfig) {
     if (_handle <= 0) return false;
-    newConfig.muninnAddr = newConfig.muninnAddr.trim().replaceFirst(
-      RegExp(r'/+$'),
-      '',
+    final candidates = newConfig.allMuninnServers;
+    if (candidates.isEmpty ||
+        candidates.length > AppConfig.maxMuninnServers ||
+        !candidates.every(AppConfig.isValidMuninnAddr)) {
+      return false;
+    }
+    newConfig.setMuninnServers(candidates);
+    if (newConfig.muninnIce.values.any((ice) => ice.validationError != null)) {
+      return false;
+    }
+    newConfig.muninnIce = newConfig.muninnIce.map(
+      (server, ice) => MapEntry(server, ice.normalized()),
     );
-    if (!AppConfig.isValidMuninnAddr(newConfig.muninnAddr)) return false;
+    final previousConfig = config;
+    final previous = previousConfig.allMuninnServers.toSet();
     final needsReconnect =
         newConfig.username != _currentUsername ||
-        newConfig.muninnAddr != _config.muninnAddr ||
-        newConfig.turnAddr != _config.turnAddr ||
-        newConfig.turnUser != _config.turnUser ||
-        newConfig.turnPass != _config.turnPass;
+        previous.length != candidates.length ||
+        !previous.containsAll(candidates) ||
+        candidates.any(
+          (server) => !newConfig
+              .iceFor(server)
+              .sameSettingsAs(previousConfig.iceFor(server)),
+        );
     final r = bridge.messengerSaveConfig(
       _handle,
       jsonEncode(newConfig.toJson()),
     );
     if (r.contains('"ok"')) {
       _config = newConfig;
-      return !needsReconnect || _recreate(newConfig.username);
+      if (needsReconnect) return _recreate(newConfig.username);
+      _loadConfig();
+      return true;
     }
     return false;
   }
 
   Future<bool> setUsername(String username) async {
     if (_handle <= 0 || _dbPath == null) return false;
+    _loadConfig();
     final newConfig = AppConfig(
       username: username,
       muninnAddr: _config.muninnAddr,
       chunkTtl: _config.chunkTtl,
       dbPath: _config.dbPath,
-      turnAddr: _config.turnAddr,
-      turnUser: _config.turnUser,
-      turnPass: _config.turnPass,
+      muninnServers: _config.muninnServers,
+      muninnIce: _config.muninnIce,
     );
     return saveConfig(newConfig);
   }
@@ -430,9 +472,10 @@ class MessengerService {
       _config.muninnAddr,
       _dbPath!,
       _config.chunkTtl,
-      turnAddr: _config.turnAddr,
-      turnUser: _config.turnUser,
-      turnPass: _config.turnPass,
+      muninnServers: _config.muninnServers,
+      muninnIce: _config.muninnIce.map(
+        (server, ice) => MapEntry(server, ice.toJson()),
+      ),
     );
     if (_handle <= 0) return false;
     _currentUserId = null;

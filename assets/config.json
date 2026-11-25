@@ -1,3 +1,17 @@
 {
-  "muninn": "https://muninn.evil-bread.ru"
+  "muninn_servers": [
+    "https://muninn.evil-bread.ru"
+  ],
+  "muninn_ice": {
+    "https://muninn.evil-bread.ru": {
+      "stun_urls": ["stun:stun.evil-bread.ru:3478"],
+      "turn_urls": [
+        "turn:turn.evil-bread.ru:3478?transport=udp",
+        "turn:turn.evil-bread.ru:3478?transport=tcp",
+        "turns:turn.evil-bread.ru:5349?transport=tcp"
+      ],
+      "turn_username": "turnuser",
+      "turn_password": "turnpass"
+    }
+  }
 }

@@ -12,6 +12,7 @@ import 'src/widgets/app_updates_section.dart';
 import 'src/widgets/sticker_picker.dart';
 import 'src/widgets/muninn_ice_dialog.dart';
 import 'src/widgets/muninn_connection_indicator.dart';
+import 'src/widgets/chat_date_separator.dart';
 
 void main() {
   runApp(const HuginnApp());
@@ -1739,7 +1740,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         final idx = _loadingMore ? i - 1 : i;
                         final m = _msgs[idx];
                         final own = isMe(m.from);
-                        return _interactiveMessage(m, own, theme, colorScheme);
+                        final startsDay =
+                            idx == 0 ||
+                            !DateUtils.isSameDay(
+                              _msgs[idx - 1].timestamp.toLocal(),
+                              m.timestamp.toLocal(),
+                            );
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (startsDay)
+                              ChatDateSeparator(timestamp: m.timestamp),
+                            _interactiveMessage(m, own, theme, colorScheme),
+                          ],
+                        );
                       },
                     ),
             ),

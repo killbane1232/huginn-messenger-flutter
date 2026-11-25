@@ -40,6 +40,9 @@ void main() {
   late int status;
   late List<int> downloadBytes;
   late bool permissionGranted;
+  Object? installerFailure;
+  Object? settingsFailure;
+  late int settingsOpens;
 
   AppUpdateService createService({
     String version = '1.0.0',
@@ -51,7 +54,12 @@ void main() {
     temporaryDirectory: () async => cache,
     openInstaller: (path) async {
       opened.add(path);
+      if (installerFailure != null) throw installerFailure!;
       return permissionGranted;
+    },
+    openSecuritySettings: () async {
+      settingsOpens++;
+      if (settingsFailure != null) throw settingsFailure!;
     },
     client:
         client ??
@@ -71,12 +79,89 @@ void main() {
     status = 200;
     downloadBytes = _bytes;
     permissionGranted = true;
+    installerFailure = null;
+    settingsFailure = null;
+    settingsOpens = 0;
     service = createService();
   });
   tearDown(() async {
     service.dispose();
     await cache.delete(recursive: true);
   });
+
+  test(
+    'blocked macOS installer offers settings and retries the verified file',
+    () async {
+      service.dispose();
+      service = createService(platform: UpdatePlatform.macos);
+      final asset = (await service.check()).release!.asset!;
+      expect(service.canOpenInstallationSettings(asset), isFalse);
+      installerFailure = StateError('LaunchServices rejected the package');
+      await expectLater(
+        service.install(asset, onProgress: (_) {}),
+        throwsA(
+          isA<UpdateException>().having(
+            (error) => error.message,
+            'message',
+            contains('Allow installation…'),
+          ),
+        ),
+      );
+      expect(service.canOpenInstallationSettings(asset), isTrue);
+      expect(settingsOpens, 0);
+      await service.openInstallationSettings();
+      expect(settingsOpens, 1);
+      expect(
+        opened,
+        hasLength(1),
+      ); // Opening settings does not install or approve.
+      installerFailure = null;
+      expect(await service.install(asset, onProgress: (_) {}), isTrue);
+      expect(opened, [opened.first, opened.first]);
+      expect(requests, hasLength(2)); // Release check and one download.
+      final newAsset = (await service.check()).release!.asset!;
+      expect(service.canOpenInstallationSettings(newAsset), isFalse);
+
+      // A retry must still reject a file modified after the initial verification.
+      await File(opened.first).writeAsBytes(List.filled(_bytes.length, 0));
+      await expectLater(
+        service.install(asset, onProgress: (_) {}),
+        throwsA(isA<UpdateException>()),
+      );
+      expect(service.canOpenInstallationSettings(asset), isFalse);
+      expect(opened, hasLength(2));
+    },
+  );
+
+  test('settings launch failure gives a manual macOS path', () async {
+    service.dispose();
+    service = createService(platform: UpdatePlatform.macos);
+    settingsFailure = StateError('Settings unavailable');
+    await expectLater(
+      service.openInstallationSettings(),
+      throwsA(
+        isA<UpdateException>().having(
+          (error) => error.message,
+          'message',
+          contains('Open System Settings → Privacy & Security manually'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'other platforms do not offer or launch macOS security settings',
+    () async {
+      final asset = (await service.check()).release!.asset!;
+      await service.install(asset, onProgress: (_) {});
+      expect(service.canOpenInstallationSettings(asset), isFalse);
+      await expectLater(
+        service.openInstallationSettings(),
+        throwsA(isA<UpdateException>()),
+      );
+      expect(settingsOpens, 0);
+    },
+  );
 
   test('selects only the package for the current platform', () async {
     for (final entry in {

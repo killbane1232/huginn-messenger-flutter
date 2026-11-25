@@ -8,10 +8,16 @@ import 'package:huginn_messenger/src/services/app_update_service.dart';
 import 'package:huginn_messenger/src/widgets/app_updates_section.dart';
 
 class _Updates extends AppUpdateService {
-  _Updates() : super(platform: UpdatePlatform.android);
+  _Updates({UpdatePlatform platform = UpdatePlatform.android})
+    : super(platform: platform);
   Completer<UpdateCheck>? pendingCheck;
   Completer<bool>? pendingInstall;
   Object? failure;
+  Object? installFailure;
+  bool verifyPackage = true;
+  UpdateAsset? verifiedAsset;
+  int settingsOpens = 0;
+  Completer<void>? pendingSettings;
   UpdateCheck result = const UpdateCheck(
     currentVersion: '1.0.0',
     release: AppRelease(version: '1.1.0'),
@@ -34,7 +40,19 @@ class _Updates extends AppUpdateService {
   }) async {
     installs++;
     onProgress(0.5);
+    if (verifyPackage) verifiedAsset = asset;
+    if (installFailure != null) throw installFailure!;
     return pendingInstall?.future ?? true;
+  }
+
+  @override
+  bool canOpenInstallationSettings(UpdateAsset asset) =>
+      platform == UpdatePlatform.macos && verifiedAsset == asset;
+
+  @override
+  Future<void> openInstallationSettings() async {
+    settingsOpens++;
+    await pendingSettings?.future;
   }
 }
 
@@ -171,10 +189,72 @@ void main() {
     await tester.tap(find.text('Install update'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Allow Huginn to install apps'), findsOneWidget);
+    expect(find.text('Allow installation…'), findsNothing);
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
     );
+  });
+
+  testWidgets('blocked macOS package offers an explicit settings handoff', (
+    tester,
+  ) async {
+    updates.dispose();
+    updates = _Updates(platform: UpdatePlatform.macos)..result = available;
+    await show(tester);
+    await tester.tap(find.text('Check for updates'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow installation…'), findsNothing);
+    updates.installFailure = const UpdateException(
+      'macOS blocked the installer',
+    );
+    await tester.tap(find.text('Install update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow installation…'), findsOneWidget);
+    expect(find.textContaining('Open Anyway for this package'), findsOneWidget);
+    expect(updates.settingsOpens, 0);
+    updates.pendingSettings = Completer<void>();
+    await tester.tap(find.text('Allow installation…'));
+    await tester.pump();
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+      isNull,
+    );
+    updates.pendingSettings!.complete();
+    await tester.pumpAndSettle();
+    expect(updates.settingsOpens, 1);
+    expect(updates.installs, 1);
+    expect(
+      find.textContaining('Approve the package in Privacy & Security'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Installer opened.'), findsNothing);
+    updates.installFailure = null;
+    await tester.tap(find.text('Install update'));
+    await tester.pumpAndSettle();
+    expect(updates.installs, 2);
+    expect(find.text('Allow installation…'), findsOneWidget);
+    updates.failure = const UpdateException('Network unavailable');
+    await tester.tap(find.text('Check for updates'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow installation…'), findsNothing);
+  });
+
+  testWidgets('a failed package check never offers installation approval', (
+    tester,
+  ) async {
+    updates.dispose();
+    updates = _Updates(platform: UpdatePlatform.macos)
+      ..result = available
+      ..verifyPackage = false
+      ..installFailure = const UpdateException('Package verification failed.');
+    await show(tester);
+    await tester.tap(find.text('Check for updates'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Install update'));
+    await tester.pumpAndSettle();
+    expect(find.text('Package verification failed.'), findsOneWidget);
+    expect(find.text('Allow installation…'), findsNothing);
   });
 
   testWidgets(

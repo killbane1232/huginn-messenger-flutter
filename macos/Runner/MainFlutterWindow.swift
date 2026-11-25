@@ -15,6 +15,31 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     platformChannel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "openUpdateSecuritySettings" {
+        // Keep approval in the system UI. Never change Gatekeeper or quarantine.
+        let settingsURLs = [
+          "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+          "x-apple.systempreferences:com.apple.preference.security?General"
+        ]
+        for address in settingsURLs {
+          if let url = URL(string: address), NSWorkspace.shared.open(url) {
+            result(true)
+            return
+          }
+        }
+        if let appURL = NSWorkspace.shared.urlForApplication(
+          withBundleIdentifier: "com.apple.systempreferences"
+        ), NSWorkspace.shared.open(appURL) {
+          result(true)
+        } else {
+          result(FlutterError(
+            code: "SETTINGS_UNAVAILABLE",
+            message: "Open System Settings → Privacy & Security manually.",
+            details: nil
+          ))
+        }
+        return
+      }
       if call.method == "installUpdate" {
         guard let arguments = call.arguments as? [String: Any],
               let path = arguments["path"] as? String,

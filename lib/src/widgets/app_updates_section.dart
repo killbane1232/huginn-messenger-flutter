@@ -125,10 +125,32 @@ class _AppUpdatesSectionState extends State<AppUpdatesSection>
     });
   }
 
+  Future<void> _openInstallationSettings() async {
+    setState(() {
+      _busy = true;
+      _error = false;
+    });
+    try {
+      await _service.openInstallationSettings();
+      if (!mounted) return;
+      setState(() {
+        _status =
+            'Approve the package in Privacy & Security, then return to '
+            'Huginn and tap Install update again if the installer has not opened.';
+      });
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final colors = Theme.of(context).colorScheme;
+    final canOpenInstallationSettings =
+        _asset != null && _service.canOpenInstallationSettings(_asset!);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -181,8 +203,22 @@ class _AppUpdatesSectionState extends State<AppUpdatesSection>
                     : 'Install update',
               ),
             ),
+            if (canOpenInstallationSettings)
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _openInstallationSettings,
+                icon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
+                label: const Text('Allow installation…'),
+              ),
           ],
         ),
+        if (canOpenInstallationSettings) ...[
+          const SizedBox(height: 8),
+          Text(
+            'If macOS blocked "${_asset!.name}", open Privacy & Security, '
+            'scroll to Security and choose Open Anyway for this package. '
+            'If it is not listed, tap Install update to try opening it again.',
+          ),
+        ],
       ],
     );
   }

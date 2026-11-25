@@ -6,17 +6,27 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:huginn_messenger/src/models/config.dart';
+import 'package:huginn_messenger/src/models/muninn_ice_config.dart';
 import 'package:huginn_messenger/src/services/messenger_service.dart';
 
 // Run with HUGINN_NATIVE_TESTS=1 and LD_LIBRARY_PATH pointing to a rebuilt core.
 // A separate isolate keeps HTTP responsive during synchronous native calls.
-Future<void> _serveMuninn(SendPort output) async {
+Future<void> _serveMuninn((SendPort, int) options) async {
+  final (output, delay) = options;
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   output.send('http://127.0.0.1:${server.port}');
   await for (final request in server) {
-    if (request.method == 'POST' && request.uri.path == '/api/v1/peers') {
+    if (request.uri.path == '/health') {
+      await Future<void>.delayed(Duration(milliseconds: delay));
+      request.response.write('{"status":"ok"}');
+    } else if (request.method == 'POST' &&
+        request.uri.path == '/api/v1/peers') {
       final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
       request.response.statusCode = HttpStatus.created;
+      if (body.containsKey('muninn_ice') ||
+          jsonEncode(body).contains('native-password')) {
+        output.send('ICE credentials leaked into registration');
+      }
       if (body['fake'] != true) output.send(body['login']);
     } else {
       request.response.headers.contentType = ContentType.json;
@@ -30,14 +40,17 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'asset bootstrap, immediate address change and SQLite restart',
+    'list bootstrap selects fastest, removal and username survive restart',
     () async {
       final firstPort = ReceivePort();
       final secondPort = ReceivePort();
       final firstEvents = StreamIterator<dynamic>(firstPort);
       final secondEvents = StreamIterator<dynamic>(secondPort);
-      final first = await Isolate.spawn(_serveMuninn, firstPort.sendPort);
-      final second = await Isolate.spawn(_serveMuninn, secondPort.sendPort);
+      final first = await Isolate.spawn(_serveMuninn, (firstPort.sendPort, 40));
+      final second = await Isolate.spawn(_serveMuninn, (
+        secondPort.sendPort,
+        1,
+      ));
       final directory = await Directory.systemTemp.createTemp('huginn-config-');
       var service = MessengerService();
       final messenger =
@@ -58,6 +71,17 @@ void main() {
       final firstAddress = firstEvents.current as String;
       await secondEvents.moveNext();
       final secondAddress = secondEvents.current as String;
+      final firstICE = MuninnIceConfig(
+        stunUrls: ['stun:first.example:3478'],
+        turnUrls: ['turn:first.example:3478?transport=udp'],
+        turnUsername: 'first-user',
+        turnPassword: 'first-native-password',
+      );
+      final secondICE = MuninnIceConfig(
+        turnUrls: ['turns:second.example:5349?transport=tcp'],
+        turnUsername: 'second-user',
+        turnPassword: 'second-native-password',
+      );
       rootBundle.evict('assets/config.json');
       messenger.setMockMessageHandler('flutter/assets', (message) async {
         final key = utf8.decode(
@@ -68,26 +92,68 @@ void main() {
         );
         if (key != 'assets/config.json') return null;
         return ByteData.sublistView(
-          Uint8List.fromList(utf8.encode(jsonEncode({'muninn': firstAddress}))),
+          Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'muninn_servers': [firstAddress, secondAddress],
+                'muninn_ice': {
+                  firstAddress: firstICE.toJson(),
+                  secondAddress: secondICE.toJson(),
+                },
+              }),
+            ),
+          ),
         );
       });
 
       final dbPath = '${directory.path}/huginn.db';
       expect(await service.init(username: 'alice', dbPath: dbPath), isTrue);
-      expect(service.config.muninnAddr, firstAddress);
+      expect(service.config.muninnAddr, secondAddress);
+      expect(service.config.muninnServers, [firstAddress]);
+      expect(
+        service.config.iceFor(firstAddress).sameSettingsAs(firstICE),
+        isTrue,
+      );
+      expect(
+        service.config.iceFor(secondAddress).sameSettingsAs(secondICE),
+        isTrue,
+      );
       expect(await service.getFileDownloads(), isEmpty);
       await expectLater(
         service.cancelFileDownload('unknown-file'),
         throwsStateError,
       );
-      await firstEvents.moveNext().timeout(const Duration(seconds: 10));
-      expect(firstEvents.current, 'alice');
+      await secondEvents.moveNext().timeout(const Duration(seconds: 10));
+      expect(secondEvents.current, 'alice');
+      // An account-only edit must preserve every candidate and its ICE credentials.
+      expect(await service.setUsername('alice'), isTrue);
+      expect(service.config.allMuninnServers.toSet(), {
+        firstAddress,
+        secondAddress,
+      });
 
       expect(
         service.sendMessage('unknown-recipient', 'keep this draft'),
         isFalse,
       );
       expect(service.lastSendError, 'recipient not found');
+      expect(
+        service.config.iceFor(secondAddress).sameSettingsAs(secondICE),
+        isTrue,
+      );
+      final updated = AppConfig.fromJson(service.config.toJson());
+      updated.muninnIce[secondAddress] = MuninnIceConfig(
+        turnUrls: secondICE.turnUrls,
+        turnUsername: 'changed-user',
+        turnPassword: 'changed-native-password',
+      );
+      expect(service.saveConfig(updated), isTrue);
+      await secondEvents.moveNext().timeout(const Duration(seconds: 10));
+      expect(secondEvents.current, 'alice');
+      expect(
+        service.config.iceFor(secondAddress).turnPassword,
+        'changed-native-password',
+      );
       final group = await service.createGroup('delivery regression');
       expect(group, isNotNull);
       expect(
@@ -109,14 +175,24 @@ void main() {
 
       expect(
         service.saveConfig(
-          AppConfig(username: 'bob', muninnAddr: secondAddress),
+          AppConfig(
+            username: 'bob',
+            muninnServers: [firstAddress],
+            muninnIce: service.config.muninnIce,
+          ),
         ),
         isTrue,
       );
-      expect(service.config.muninnAddr, secondAddress);
+      expect(service.config.muninnAddr, firstAddress);
       expect(service.currentUsername, 'bob');
-      await secondEvents.moveNext().timeout(const Duration(seconds: 10));
-      expect(secondEvents.current, 'bob');
+      expect(service.config.muninnServers, isEmpty);
+      expect(service.config.muninnIce.keys, [firstAddress]);
+      expect(
+        service.config.iceFor(firstAddress).sameSettingsAs(firstICE),
+        isTrue,
+      );
+      await firstEvents.moveNext().timeout(const Duration(seconds: 10));
+      expect(firstEvents.current, 'bob');
 
       service.dispose();
       service = MessengerService();
@@ -127,9 +203,15 @@ void main() {
             throw StateError('Saved address must not read bootstrap config'),
       );
       expect(await service.init(dbPath: dbPath), isTrue);
-      expect(service.config.muninnAddr, secondAddress);
-      await secondEvents.moveNext().timeout(const Duration(seconds: 10));
-      expect(secondEvents.current, 'bob');
+      expect(service.config.muninnAddr, firstAddress);
+      expect(service.config.muninnServers, isEmpty);
+      expect(service.config.muninnIce.keys, [firstAddress]);
+      expect(
+        service.config.iceFor(firstAddress).sameSettingsAs(firstICE),
+        isTrue,
+      );
+      await firstEvents.moveNext().timeout(const Duration(seconds: 10));
+      expect(firstEvents.current, 'bob');
       expect(
         (await service.getMessages(group.uid)).single.text,
         'durably queued',

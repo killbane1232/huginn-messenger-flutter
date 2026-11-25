@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
@@ -29,26 +30,8 @@ DynamicLibrary _load() {
 
 final DynamicLibrary _lib = _load();
 
-typedef _CreateNative =
-    Int64 Function(
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-    );
-typedef _CreateDart =
-    int Function(
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-      Pointer<Utf8>,
-    );
+typedef _CreateNative = Int64 Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _CreateDart = int Function(Pointer<Utf8>, Pointer<Utf8>);
 
 typedef _TwoStrNative = Pointer<Utf8> Function(Int64, Pointer<Utf8>);
 typedef _TwoStrDart = Pointer<Utf8> Function(int, Pointer<Utf8>);
@@ -106,7 +89,7 @@ typedef _FreeStrNative = Void Function(Pointer<Utf8>);
 typedef _FreeStrDart = void Function(Pointer<Utf8>);
 
 final _create = _lib.lookupFunction<_CreateNative, _CreateDart>(
-  'messenger_create',
+  'messenger_create_with_config',
 );
 final _destroy = _lib.lookupFunction<_DestroyNative, _DestroyDart>(
   'messenger_destroy',
@@ -180,7 +163,7 @@ String _readAndFree(Pointer<Utf8> ptr) {
   return s;
 }
 
-// Empty address loads SQLite settings; -4 means no saved Muninn address.
+// Omitted candidates load SQLite settings; -4 means none are saved.
 const messengerMuninnAddressRequired = -4;
 
 int messengerCreate(
@@ -188,26 +171,23 @@ int messengerCreate(
   String muninnAddr,
   String dbPath,
   String chunkTtl, {
-  String turnAddr = '',
-  String turnUser = '',
-  String turnPass = '',
+  List<String>? muninnServers,
+  Map<String, dynamic>? muninnIce,
 }) {
-  final u = username.toNativeUtf8();
-  final m = muninnAddr.toNativeUtf8();
-  final d = dbPath.toNativeUtf8();
-  final c = chunkTtl.toNativeUtf8();
-  final ta = turnAddr.toNativeUtf8();
-  final tu = turnUser.toNativeUtf8();
-  final tp = turnPass.toNativeUtf8();
-  final handle = _create(u, m, d, c, ta, tu, tp);
-  calloc.free(u);
-  calloc.free(m);
-  calloc.free(d);
-  calloc.free(c);
-  calloc.free(ta);
-  calloc.free(tu);
-  calloc.free(tp);
-  return handle;
+  final config = jsonEncode({
+    'username': username,
+    'muninn': muninnAddr,
+    'chunk_ttl': chunkTtl,
+    'muninn_servers': ?muninnServers,
+    'muninn_ice': ?muninnIce,
+  }).toNativeUtf8();
+  final db = dbPath.toNativeUtf8();
+  try {
+    return _create(config, db);
+  } finally {
+    calloc.free(config);
+    calloc.free(db);
+  }
 }
 
 void messengerDestroy(int handle) => _destroy(handle);

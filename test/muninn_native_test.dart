@@ -40,7 +40,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'list bootstrap selects fastest, removal and username survive restart',
+    'list bootstrap selects fastest; settings and deleted chats survive restart',
     () async {
       final firstPort = ReceivePort();
       final secondPort = ReceivePort();
@@ -215,6 +215,22 @@ void main() {
       expect(
         (await service.getMessages(group.uid)).single.text,
         'durably queued',
+      );
+      expect(service.deleteChat(''), isFalse);
+      expect(service.deleteChat(group.uid), isTrue);
+      expect(await service.getMessages(group.uid), isEmpty);
+      expect(service.getHiddenChatIds(), contains(group.uid));
+      service.dispose();
+      service = MessengerService();
+      expect(await service.init(dbPath: dbPath), isTrue);
+      expect(await service.getMessages(group.uid), isEmpty);
+      expect(service.getHiddenChatIds(), contains(group.uid));
+      expect(service.getGroups().map((g) => g.uid), contains(group.uid));
+      expect(service.sendMessage(group.uid, 'new conversation'), isTrue);
+      expect(service.getHiddenChatIds(), isNot(contains(group.uid)));
+      expect(
+        (await service.getMessages(group.uid)).single.text,
+        'new conversation',
       );
     },
     skip: Platform.environment['HUGINN_NATIVE_TESTS'] != '1',

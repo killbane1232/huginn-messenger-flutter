@@ -100,6 +100,12 @@ final _getMe = _lib.lookupFunction<_StrFnNative, _StrFnDart>(
 final _getPeers = _lib.lookupFunction<_StrFnNative, _StrFnDart>(
   'messenger_get_peers',
 );
+final _getHiddenChats = _lib.lookupFunction<_StrFnNative, _StrFnDart>(
+  'messenger_get_hidden_chats',
+);
+final _deleteChat = _lib.lookupFunction<_StrStrNative, _StrStrDart>(
+  'messenger_delete_chat',
+);
 final _searchPeers = _lib.lookupFunction<_StrStrNative, _StrStrDart>(
   'messenger_search_peers',
 );
@@ -195,6 +201,18 @@ void messengerDestroy(int handle) => _destroy(handle);
 String messengerGetMe(int handle) => _readAndFree(_getMe(handle));
 
 String messengerGetPeers(int handle) => _readAndFree(_getPeers(handle));
+
+String messengerGetHiddenChats(int handle) =>
+    _readAndFree(_getHiddenChats(handle));
+
+String messengerDeleteChat(int handle, String chatId) {
+  final id = chatId.toNativeUtf8();
+  try {
+    return _readAndFree(_deleteChat(handle, id));
+  } finally {
+    calloc.free(id);
+  }
+}
 
 String messengerSearchPeers(int handle, String query) {
   final q = query.toNativeUtf8();

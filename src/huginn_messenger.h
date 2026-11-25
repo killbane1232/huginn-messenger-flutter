@@ -15,6 +15,7 @@ FFI_PLUGIN_EXPORT long messenger_is_peer_online(long handle, const char* peer_id
 // Getters (return JSON strings, must be freed with messenger_free_string)
 FFI_PLUGIN_EXPORT char* messenger_get_me(long handle);
 FFI_PLUGIN_EXPORT char* messenger_get_peers(long handle);
+FFI_PLUGIN_EXPORT char* messenger_get_hidden_chats(long handle);
 FFI_PLUGIN_EXPORT char* messenger_search_peers(long handle, const char* query);
 FFI_PLUGIN_EXPORT char* messenger_get_messages(long handle, const char* peer_id);
 FFI_PLUGIN_EXPORT char* messenger_get_config(long handle);
@@ -23,6 +24,7 @@ FFI_PLUGIN_EXPORT char* messenger_get_file_path(long handle, const char* file_id
 FFI_PLUGIN_EXPORT char* messenger_get_file_downloads(long handle);
 
 // Actions (return JSON: {"status":"ok"} or {"error":"..."})
+FFI_PLUGIN_EXPORT char* messenger_delete_chat(long handle, const char* chat_id);
 FFI_PLUGIN_EXPORT char* messenger_send_message(long handle, const char* to, const char* text, int ttl);
 FFI_PLUGIN_EXPORT char* messenger_send_file(long handle, const char* to, const char* text, const char* file_path, int ttl);
 FFI_PLUGIN_EXPORT char* messenger_save_config(long handle, const char* json_config);

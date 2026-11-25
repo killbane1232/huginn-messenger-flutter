@@ -34,6 +34,7 @@ class MessengerService {
   final _peersCtrl = StreamController<List<Peer>>.broadcast();
   AppConfig _config = AppConfig();
   List<Peer> _lastPeers = [];
+  Set<String> _hiddenChatIds = {};
   final Map<String, String> _filePaths = {};
 
   bool get isReady => _handle > 0;
@@ -50,6 +51,33 @@ class MessengerService {
 
   List<Peer> get peers => _lastPeers;
   Map<String, String> get filePaths => _filePaths;
+
+  Set<String> getHiddenChatIds() {
+    if (_handle <= 0) return {};
+    try {
+      _hiddenChatIds =
+          (jsonDecode(bridge.messengerGetHiddenChats(_handle)) as List)
+              .cast<String>()
+              .toSet();
+    } catch (_) {
+      // Keep the last known state if the native store is temporarily unavailable.
+    }
+    return Set.unmodifiable(_hiddenChatIds);
+  }
+
+  bool deleteChat(String chatId) {
+    if (_handle <= 0 || chatId.isEmpty) return false;
+    try {
+      final result =
+          jsonDecode(bridge.messengerDeleteChat(_handle, chatId))
+              as Map<String, dynamic>;
+      if (result['status'] != 'ok') return false;
+      _hiddenChatIds.add(chatId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<GroupChat?> createGroup(String name) async {
     if (_handle <= 0) return null;
@@ -503,6 +531,7 @@ class MessengerService {
     }
     _currentUserId = null;
     _lastPeers = [];
+    _hiddenChatIds = {};
     _filePaths.clear();
     _loadMe();
     _loadConfig();

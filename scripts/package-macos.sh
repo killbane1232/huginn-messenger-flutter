@@ -14,6 +14,19 @@ staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 mkdir -p "$staging/root/Applications" "$root_dir/build/packages"
 ditto "$app" "$staging/root/Applications/huginn_messenger.app"
+staged_app="$staging/root/Applications/huginn_messenger.app"
+# Incremental Flutter builds may re-sign App.framework without refreshing the
+# outer app's seal. Verify nested code, then refresh only an ad-hoc app signature.
+# Never replace a Developer ID signature with an ad-hoc one.
+signature="$(codesign --display --verbose=2 "$staged_app" 2>&1)"
+if [[ "$signature" == *"Signature=adhoc"* ]]; then
+  for framework in "$staged_app/Contents/Frameworks/"*.framework; do
+    codesign --verify --deep --strict "$framework"
+  done
+  codesign --force --sign - \
+    --preserve-metadata=identifier,entitlements,requirements,flags,runtime "$staged_app"
+fi
+codesign --verify --deep --strict "$staged_app"
 pkgbuild --analyze --root "$staging/root" "$staging/components.plist"
 # Always replace the complete installed bundle, including removed libraries.
 # Do not accidentally update a developer's build or another unpacked copy.

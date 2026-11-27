@@ -23,6 +23,12 @@ class MessageEvent extends AppEvent {
   MessageEvent(this.message) : super('message');
 }
 
+class MessageDeletedEvent extends AppEvent {
+  final String chatId;
+  final String msgId;
+  MessageDeletedEvent(this.chatId, this.msgId) : super('message_deleted');
+}
+
 class FileReadyEvent extends AppEvent {
   final String fileId;
   final String filePath;

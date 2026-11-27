@@ -133,10 +133,15 @@ void main() {
       });
 
       expect(
-        service.sendMessage('unknown-recipient', 'keep this draft'),
-        isFalse,
+        service.sendMessage('unknown-recipient', 'keep this message'),
+        isTrue,
       );
-      expect(service.lastSendError, 'recipient not found');
+      expect(service.lastSendError, isNull);
+      final failed = (await service.getMessages('unknown-recipient')).single;
+      expect(failed.sendError, 'recipient not found');
+      expect(failed.text, 'keep this message');
+      expect(service.retryMessage(failed.msgId), isNull);
+      expect((await service.getMessages('unknown-recipient')).length, 1);
       expect(
         service.config.iceFor(secondAddress).sameSettingsAs(secondICE),
         isTrue,
@@ -217,6 +222,16 @@ void main() {
         'durably queued',
       );
       expect(service.deleteChat(''), isFalse);
+      final restoredFailure = (await service.getMessages(
+        'unknown-recipient',
+      )).single;
+      expect(restoredFailure.msgId, failed.msgId);
+      expect(restoredFailure.sendFailed, isTrue);
+      expect(
+        service.deleteFailedMessage('unknown-recipient', failed.msgId),
+        isTrue,
+      );
+      expect(await service.getMessages('unknown-recipient'), isEmpty);
       expect(service.deleteChat(group.uid), isTrue);
       expect(await service.getMessages(group.uid), isEmpty);
       expect(service.getHiddenChatIds(), contains(group.uid));
@@ -224,6 +239,7 @@ void main() {
       service = MessengerService();
       expect(await service.init(dbPath: dbPath), isTrue);
       expect(await service.getMessages(group.uid), isEmpty);
+      expect(await service.getMessages('unknown-recipient'), isEmpty);
       expect(service.getHiddenChatIds(), contains(group.uid));
       expect(service.getGroups().map((g) => g.uid), contains(group.uid));
       expect(service.sendMessage(group.uid, 'new conversation'), isTrue);

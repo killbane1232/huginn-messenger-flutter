@@ -36,6 +36,7 @@ class MessengerService {
   List<Peer> _lastPeers = [];
   Set<String> _hiddenChatIds = {};
   final Map<String, String> _filePaths = {};
+  final Set<String> _deletedMessageIds = {};
 
   bool get isReady => _handle > 0;
   String? get currentUserId => _currentUserId;
@@ -287,7 +288,9 @@ class MessengerService {
         _eventCtrl.add(PeersEvent(list));
       } else if (type == 'message' && raw != null) {
         final msg = ChatMessage.fromJson(raw as Map<String, dynamic>);
-        _eventCtrl.add(MessageEvent(msg));
+        if (!_deletedMessageIds.contains(msg.msgId)) {
+          _eventCtrl.add(MessageEvent(msg));
+        }
       } else if (type == 'file_ready' && raw != null) {
         final m = raw as Map<String, dynamic>;
         final fileId = m['file_id'] as String? ?? '';
@@ -425,6 +428,24 @@ class MessengerService {
       _lastSendError = 'Invalid response while queuing message';
     }
     return false;
+  }
+
+  ChatMessage? retryMessage(String msgId) {
+    if (!isReady) return null;
+    final response = bridge.messengerRetryMessage(_handle, msgId);
+    if (!_acceptSendResult(response)) return null;
+    final result = jsonDecode(response) as Map<String, dynamic>;
+    return ChatMessage.fromJson(result['message'] as Map<String, dynamic>);
+  }
+
+  bool deleteFailedMessage(String chatId, String msgId) {
+    if (!isReady) return false;
+    final response = bridge.messengerDeleteFailedMessage(_handle, msgId);
+    final result = jsonDecode(response) as Map<String, dynamic>;
+    if (result['status'] != 'ok') return false;
+    _deletedMessageIds.add(msgId);
+    _eventCtrl.add(MessageDeletedEvent(chatId, msgId));
+    return true;
   }
 
   bool isOnline(String peerId) {

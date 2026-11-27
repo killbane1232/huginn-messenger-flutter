@@ -1,11 +1,7 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 
-import '../models/default_stickers.dart';
 import '../models/sticker_category.dart';
+import 'frontend_database.dart';
 
 class StickerLibraryException implements Exception {
   const StickerLibraryException(this.message);
@@ -14,67 +10,21 @@ class StickerLibraryException implements Exception {
 
 /// One library shared by all chats. Changes become visible only after saving.
 class StickerLibrary extends ChangeNotifier {
-  StickerLibrary({
-    Future<String?> Function()? read,
-    Future<void> Function(String)? write,
-    Map<String, List<String>> defaults = defaultStickerCategories,
-  }) : _read = read ?? _readFile,
-       _write = write ?? _writeFile,
-       _categories = List.unmodifiable(
-         defaults.entries.map(
-           (entry) => StickerCategory(name: entry.key, stickers: entry.value),
-         ),
-       );
+  StickerLibrary({StickerStore? store}) : _store = store ?? FrontendDatabase();
 
-  final Future<String?> Function() _read;
-  final Future<void> Function(String) _write;
-  List<StickerCategory> _categories;
+  final StickerStore _store;
+  List<StickerCategory> _categories = const [];
   Future<void>? _loading;
   Future<void>? _pending;
   bool _disposed = false;
 
   List<StickerCategory> get categories => _categories;
 
-  static Future<File> _file() async {
-    final directory = await getApplicationSupportDirectory();
-    return File('${directory.path}/stickers.json');
-  }
-
-  static Future<String?> _readFile() async {
-    final file = await _file();
-    return await file.exists() ? file.readAsString() : null;
-  }
-
-  static Future<void> _writeFile(String data) async {
-    final file = await _file();
-    await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(data, flush: true);
-    await temporary.rename(file.path);
-  }
-
   Future<void> load() => _loading ??= _load();
 
   Future<void> _load() async {
     try {
-      final data = await Future<String?>.sync(_read);
-      if (data != null) {
-        final json = jsonDecode(data) as Map<String, dynamic>;
-        if (json['version'] != 1) {
-          throw const FormatException('Unsupported sticker library version');
-        }
-        final categories = (json['categories'] as List)
-            .map(
-              (value) =>
-                  StickerCategory.fromJson(value as Map<String, dynamic>),
-            )
-            .toList();
-        final names = categories.map((category) => category.name.toLowerCase());
-        if (categories.isEmpty || names.toSet().length != categories.length) {
-          throw const FormatException('Invalid sticker categories');
-        }
-        _categories = List.unmodifiable(categories);
-      }
+      _categories = List.unmodifiable(await _store.load());
       if (!_disposed) notifyListeners();
     } catch (_) {
       _loading = null;
@@ -146,17 +96,102 @@ class StickerLibrary extends ChangeNotifier {
       ..addAll(names.map((name) => byName[name]!));
   });
 
+  Future<void> deleteCategory(
+    String name, {
+    String? moveToCategory,
+    bool createCategory = false,
+  }) => _update((categories) {
+    final source = _categoryIndex(categories, name);
+    if (moveToCategory != null) {
+      final destinationName = moveToCategory.trim();
+      final stickers = categories[source].stickers;
+      if (createCategory) {
+        _validateNewCategory(destinationName);
+        categories.add(
+          StickerCategory(name: destinationName, stickers: stickers),
+        );
+      } else {
+        final destination = _categoryIndex(categories, destinationName);
+        if (source == destination) {
+          throw const StickerLibraryException('Выберите другую папку');
+        }
+        final target = categories[destination];
+        // Keep every occurrence, including duplicates, when removing a folder.
+        categories[destination] = StickerCategory(
+          name: target.name,
+          stickers: [...target.stickers, ...stickers],
+        );
+      }
+    } else if (createCategory) {
+      throw const StickerLibraryException('Введите название папки');
+    }
+    // Transfer and removal are committed together by _update.
+    categories.removeAt(source);
+  });
+
+  Future<void> deleteSticker({
+    required String categoryName,
+    required String text,
+  }) => _update((categories) {
+    final index = _categoryIndex(categories, categoryName);
+    categories[index] = _withoutSticker(categories[index], text);
+  });
+
+  Future<void> moveSticker({
+    required String fromCategory,
+    required String toCategory,
+    required String text,
+    bool createCategory = false,
+  }) => _update((categories) {
+    final source = _categoryIndex(categories, fromCategory);
+    final updated = _withoutSticker(categories[source], text);
+    final destinationName = toCategory.trim();
+    if (createCategory) {
+      _validateNewCategory(destinationName);
+      categories.add(StickerCategory(name: destinationName, stickers: [text]));
+    } else {
+      final destination = _categoryIndex(categories, destinationName);
+      if (source == destination) {
+        throw const StickerLibraryException('Выберите другую папку');
+      }
+      final target = categories[destination];
+      if (target.stickers.contains(text)) {
+        throw const StickerLibraryException('Этот стикер уже есть в папке');
+      }
+      categories[destination] = StickerCategory(
+        name: target.name,
+        stickers: [...target.stickers, text],
+      );
+    }
+    categories[source] = updated;
+  });
+
+  static int _categoryIndex(List<StickerCategory> categories, String name) {
+    final index = categories.indexWhere((category) => category.name == name);
+    if (index < 0) {
+      throw const StickerLibraryException('Папка уже удалена');
+    }
+    return index;
+  }
+
+  static StickerCategory _withoutSticker(
+    StickerCategory category,
+    String text,
+  ) {
+    final stickers = List<String>.of(category.stickers);
+    // Older collections can contain identical stickers; remove one occurrence.
+    if (!stickers.remove(text)) {
+      throw const StickerLibraryException('Стикер уже перемещён или удалён');
+    }
+    return StickerCategory(name: category.name, stickers: stickers);
+  }
+
   Future<void> _update(void Function(List<StickerCategory>) change) {
     final operation = (_pending ?? Future<void>.value()).then((_) async {
       await load();
       final next = List<StickerCategory>.of(_categories);
       change(next);
-      await _write(
-        jsonEncode({
-          'version': 1,
-          'categories': next.map((category) => category.toJson()).toList(),
-        }),
-      );
+      await _store.save(next);
       _categories = List.unmodifiable(next);
       if (!_disposed) notifyListeners();
     });

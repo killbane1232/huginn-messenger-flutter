@@ -1,29 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:huginn_messenger/src/services/sticker_library.dart';
 
+import 'support/memory_sticker_store.dart';
+
 void main() {
   late StickerLibrary library;
-  String? saved;
-  bool failWrite = false;
-  const defaults = {
-    'Радость': ['(^_^)'],
-    'Грусть': ['(T_T)'],
-  };
+  late MemoryStickerStore store;
 
   setUp(() {
-    saved = null;
-    failWrite = false;
-    library = StickerLibrary(
-      defaults: defaults,
-      read: () async => saved,
-      write: (data) async {
-        if (failWrite) throw StateError('disk full');
-        saved = data;
-      },
-    );
+    store = MemoryStickerStore();
+    library = StickerLibrary(store: store);
   });
   tearDown(() => library.dispose());
 
@@ -39,10 +27,7 @@ void main() {
     );
     await library.reorderCategories(['Мои', 'Грусть', 'Пустая', 'Радость']);
 
-    final reopened = StickerLibrary(
-      read: () async => saved,
-      write: (_) async {},
-    );
+    final reopened = StickerLibrary(store: store);
     addTearDown(reopened.dispose);
     await reopened.load();
     expect(reopened.categories.map((c) => c.name), [
@@ -60,7 +45,7 @@ void main() {
     'failed save commits neither new category nor sticker; retry succeeds',
     () async {
       await library.load();
-      failWrite = true;
+      store.failWrite = true;
       await expectLater(
         library.addSticker(
           text: '☆',
@@ -70,8 +55,8 @@ void main() {
         throwsStateError,
       );
       expect(library.categories, hasLength(2));
-      expect(saved, isNull);
-      failWrite = false;
+      expect(store.saved, isNull);
+      store.failWrite = false;
       await library.addSticker(
         text: '☆',
         categoryName: 'Новая',
@@ -101,7 +86,7 @@ void main() {
       for (final operation in invalid) {
         await expectLater(operation(), throwsA(isA<StickerLibraryException>()));
       }
-      expect(saved, isNull);
+      expect(store.saved, isNull);
       // The same sticker may intentionally belong to different categories.
       await library.addSticker(text: '(^_^)', categoryName: 'Грусть');
       expect(library.categories.last.stickers, ['(T_T)', '(^_^)']);
@@ -111,58 +96,149 @@ void main() {
   test('overlapping writes retain both additions in order', () async {
     final gate = Completer<void>();
     var writes = 0;
-    final queued = StickerLibrary(
-      defaults: defaults,
-      read: () async => null,
-      write: (data) async {
-        if (++writes == 1) await gate.future;
-        saved = data;
-      },
-    );
+    store.beforeSave = () async {
+      if (++writes == 1) await gate.future;
+    };
+    final queued = StickerLibrary(store: store);
     addTearDown(queued.dispose);
     final first = queued.addSticker(text: '1', categoryName: 'Радость');
     final second = queued.addSticker(text: '2', categoryName: 'Радость');
     gate.complete();
     await Future.wait([first, second]);
     expect(queued.categories.first.stickers, ['(^_^)', '1', '2']);
-    expect((jsonDecode(saved!)['categories'] as List).first['stickers'], [
-      '(^_^)',
-      '1',
-      '2',
-    ]);
+    expect(store.saved!.first.stickers, ['(^_^)', '1', '2']);
   });
 
-  test('unreadable saved data is not overwritten and can be retried', () async {
-    saved = '{broken';
-    await expectLater(library.load(), throwsFormatException);
-    await expectLater(library.addCategory('Мои'), throwsFormatException);
-    expect(saved, '{broken');
-    saved = null;
-    await library.load();
-    await library.addCategory('Мои');
-    expect(library.categories.last.name, 'Мои');
-  });
+  test(
+    'deleting a folder transfers every sticker, including duplicates',
+    () async {
+      await library.addSticker(text: '(T_T)', categoryName: 'Радость');
+      await library.deleteCategory('Грусть', moveToCategory: 'Радость');
+      expect(library.categories.single.name, 'Радость');
+      expect(library.categories.single.stickers, ['(^_^)', '(T_T)', '(T_T)']);
+      final reopened = StickerLibrary(store: store);
+      addTearDown(reopened.dispose);
+      await reopened.load();
+      expect(reopened.categories.single.stickers, ['(^_^)', '(T_T)', '(T_T)']);
+    },
+  );
 
-  test('invalid saved schema is rejected without replacing defaults', () async {
-    for (final categories in [
-      [],
-      [
-        {'name': '', 'stickers': []},
-      ],
-      [
-        {
-          'name': 'Мои',
-          'stickers': [42],
-        },
-      ],
-      [
-        {'name': 'Мои', 'stickers': []},
-        {'name': 'мои', 'stickers': []},
-      ],
-    ]) {
-      saved = jsonEncode({'version': 1, 'categories': categories});
-      await expectLater(library.load(), throwsFormatException);
-      expect(library.categories.map((c) => c.name), defaults.keys);
-    }
-  });
+  test(
+    'invalid transfer or failed save never deletes the source folder',
+    () async {
+      await library.load();
+      for (final action in [
+        () => library.deleteCategory('Радость', moveToCategory: 'Радость'),
+        () => library.deleteCategory('Радость', moveToCategory: 'Нет'),
+        () => library.deleteCategory('Нет', moveToCategory: 'Грусть'),
+        () => library.deleteCategory(
+          'Радость',
+          moveToCategory: ' грусть ',
+          createCategory: true,
+        ),
+        () => library.deleteCategory(
+          'Радость',
+          moveToCategory: ' ',
+          createCategory: true,
+        ),
+        () => library.deleteCategory('Радость', createCategory: true),
+      ]) {
+        await expectLater(action(), throwsA(isA<StickerLibraryException>()));
+      }
+      expect(store.saved, isNull);
+      store.failWrite = true;
+      await expectLater(
+        library.deleteCategory(
+          'Радость',
+          moveToCategory: 'Новая',
+          createCategory: true,
+        ),
+        throwsStateError,
+      );
+      expect(library.categories.map((c) => c.name), ['Радость', 'Грусть']);
+      expect(library.categories.first.stickers, ['(^_^)']);
+      store.failWrite = false;
+      await library.deleteCategory(
+        'Радость',
+        moveToCategory: 'Новая',
+        createCategory: true,
+      );
+      expect(library.categories.map((c) => c.name), ['Грусть', 'Новая']);
+      expect(library.categories.last.stickers, ['(^_^)']);
+    },
+  );
+
+  test(
+    'moves and deletes are atomic and reject stale or duplicate targets',
+    () async {
+      await library.load();
+      await library.addSticker(text: '(^_^)', categoryName: 'Грусть');
+      await expectLater(
+        library.moveSticker(
+          fromCategory: 'Радость',
+          toCategory: 'Грусть',
+          text: '(^_^)',
+        ),
+        throwsA(isA<StickerLibraryException>()),
+      );
+      expect(library.categories.first.stickers, ['(^_^)']);
+      await library.deleteSticker(categoryName: 'Грусть', text: '(^_^)');
+      store.failWrite = true;
+      await expectLater(library.deleteCategory('Радость'), throwsStateError);
+      await expectLater(
+        library.deleteSticker(categoryName: 'Радость', text: '(^_^)'),
+        throwsStateError,
+      );
+      await expectLater(
+        library.moveSticker(
+          fromCategory: 'Радость',
+          toCategory: 'Новая',
+          text: '(^_^)',
+          createCategory: true,
+        ),
+        throwsStateError,
+      );
+      expect(library.categories, hasLength(2));
+      expect(library.categories.first.stickers, ['(^_^)']);
+      store.failWrite = false;
+      await library.moveSticker(
+        fromCategory: 'Радость',
+        toCategory: 'Новая',
+        text: '(^_^)',
+        createCategory: true,
+      );
+      expect(library.categories.first.stickers, isEmpty);
+      expect(library.categories.last.stickers, ['(^_^)']);
+      for (final action in [
+        () => library.deleteSticker(categoryName: 'Радость', text: '(^_^)'),
+        () => library.deleteCategory('Нет'),
+        () => library.moveSticker(
+          fromCategory: 'Новая',
+          toCategory: 'Нет',
+          text: '(^_^)',
+        ),
+        () => library.moveSticker(
+          fromCategory: 'Новая',
+          toCategory: 'Новая',
+          text: '(^_^)',
+        ),
+      ]) {
+        await expectLater(action(), throwsA(isA<StickerLibraryException>()));
+      }
+      expect(library.categories.last.stickers, ['(^_^)']);
+    },
+  );
+
+  test(
+    'failed load can be retried without overwriting the collection',
+    () async {
+      store.failRead = true;
+      await expectLater(library.load(), throwsStateError);
+      await expectLater(library.addCategory('Мои'), throwsStateError);
+      expect(store.saved, isNull);
+      store.failRead = false;
+      await library.addCategory('Мои');
+      expect(library.categories.last.name, 'Мои');
+    },
+  );
 }

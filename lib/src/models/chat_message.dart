@@ -5,6 +5,9 @@ class ChatMessage {
   final DateTime timestamp;
   final String msgId;
   final List<FileMeta> files;
+  final String sendError;
+
+  bool get sendFailed => sendError.isNotEmpty;
 
   ChatMessage({
     required this.from,
@@ -13,6 +16,7 @@ class ChatMessage {
     required this.timestamp,
     this.msgId = '',
     this.files = const [],
+    this.sendError = '',
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -31,6 +35,7 @@ class ChatMessage {
           : DateTime.now(),
       msgId: json['msg_id'] as String? ?? '',
       files: filesList,
+      sendError: json['send_error'] as String? ?? '',
     );
   }
 
@@ -40,6 +45,8 @@ class ChatMessage {
     'text': text,
     'timestamp': timestamp.toIso8601String(),
     'msg_id': msgId,
+    if (sendFailed) 'send_error': sendError,
+    if (files.isNotEmpty) 'files': files.map((file) => file.toJson()).toList(),
   };
 
   String get preview {

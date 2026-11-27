@@ -122,6 +122,12 @@ final _sendMessage = _lib.lookupFunction<_SendNative, _SendDart>(
 final _sendFile = _lib.lookupFunction<_SendFileNative, _SendFileDart>(
   'messenger_send_file',
 );
+final _retryMessage = _lib.lookupFunction<_StrStrNative, _StrStrDart>(
+  'messenger_retry_message',
+);
+final _deleteFailedMessage = _lib.lookupFunction<_StrStrNative, _StrStrDart>(
+  'messenger_delete_failed_message',
+);
 final _getConfig = _lib.lookupFunction<_StrFnNative, _StrFnDart>(
   'messenger_get_config',
 );
@@ -267,6 +273,24 @@ String messengerSendFile(
 }
 
 String messengerGetConfig(int handle) => _readAndFree(_getConfig(handle));
+
+String messengerRetryMessage(int handle, String msgId) {
+  final id = msgId.toNativeUtf8();
+  try {
+    return _readAndFree(_retryMessage(handle, id));
+  } finally {
+    calloc.free(id);
+  }
+}
+
+String messengerDeleteFailedMessage(int handle, String msgId) {
+  final id = msgId.toNativeUtf8();
+  try {
+    return _readAndFree(_deleteFailedMessage(handle, id));
+  } finally {
+    calloc.free(id);
+  }
+}
 
 String messengerSaveConfig(int handle, String json) {
   final j = json.toNativeUtf8();

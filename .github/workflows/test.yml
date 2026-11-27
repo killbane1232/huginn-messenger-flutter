@@ -55,7 +55,7 @@ jobs:
         run: |
           HUGINN_NATIVE_TESTS=1 \
           HUGINN_LIBRARY_PATH="$PWD/macos/Frameworks/huginn_messenger.framework/huginn_messenger" \
-            flutter test test/muninn_native_test.dart test/muninn_connection_native_test.dart
+            flutter test test/muninn_native_test.dart test/muninn_connection_native_test.dart test/offline_recipient_native_test.dart
       - name: Test native macOS startup and icons
         run: |
           flutter build macos --debug --target test/native_ui_host.dart

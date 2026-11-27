@@ -27,6 +27,8 @@ FFI_PLUGIN_EXPORT char* messenger_get_file_downloads(long handle);
 FFI_PLUGIN_EXPORT char* messenger_delete_chat(long handle, const char* chat_id);
 FFI_PLUGIN_EXPORT char* messenger_send_message(long handle, const char* to, const char* text, int ttl);
 FFI_PLUGIN_EXPORT char* messenger_send_file(long handle, const char* to, const char* text, const char* file_path, int ttl);
+FFI_PLUGIN_EXPORT char* messenger_retry_message(long handle, const char* msg_id);
+FFI_PLUGIN_EXPORT char* messenger_delete_failed_message(long handle, const char* msg_id);
 FFI_PLUGIN_EXPORT char* messenger_save_config(long handle, const char* json_config);
 FFI_PLUGIN_EXPORT char* messenger_cancel_file_download(long handle, const char* file_id);
 

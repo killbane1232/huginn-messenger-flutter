@@ -311,6 +311,35 @@ void main() {
     );
   });
 
+  testWidgets('deleting a failed message refreshes the chat preview', (
+    tester,
+  ) async {
+    service.peerList = [alice];
+    service.history[alice.key] = _message(
+      alice,
+      'Failed latest message',
+      '2026-11-27T12:00:00Z',
+    );
+    await showHome(tester);
+    expect(find.text('Failed latest message'), findsOneWidget);
+
+    service.history[alice.key] = _message(
+      alice,
+      'Earlier message',
+      '2026-11-27T11:00:00Z',
+    );
+    service.messageEvents.add(MessageDeletedEvent(alice.key, 'failed'));
+    await tester.pumpAndSettle();
+    expect(find.text('Failed latest message'), findsNothing);
+    expect(find.text('Earlier message'), findsOneWidget);
+
+    service.history.remove(alice.key);
+    service.messageEvents.add(MessageDeletedEvent(alice.key, 'earlier'));
+    await tester.pumpAndSettle();
+    expect(find.text('Earlier message'), findsNothing);
+    expect(find.text('No messages yet'), findsOneWidget);
+  });
+
   testWidgets('incoming and outgoing events reorder chats; old events do not', (
     tester,
   ) async {

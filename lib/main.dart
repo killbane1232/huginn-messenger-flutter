@@ -595,6 +595,12 @@ class _HomeScreenState extends State<HomeScreen> {
       unawaited(_loadMessagePreviews());
     });
     _eventSub = widget.service.events.listen((event) {
+      if (mounted && event is MessageDeletedEvent) {
+        _previewVersions.update(event.chatId, (v) => v + 1, ifAbsent: () => 1);
+        setState(() => _lastMessages.remove(event.chatId));
+        unawaited(_loadMessagePreviews(refresh: true));
+        return;
+      }
       if (!mounted || event is! MessageEvent) return;
       _hiddenChatIds = widget.service.getHiddenChatIds();
       _loadGroups();
@@ -1240,7 +1246,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-enum _MessageAction { reply, forward, createSticker }
+enum _MessageAction { reply, forward, createSticker, delete, retry }
 
 class _ForwardTarget {
   final String id;
@@ -1267,6 +1273,7 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<AppEvent>? _eventSub;
   final List<_AttachedFile> _attachedFiles = [];
   ChatMessage? _replyingTo;
+  final Set<String> _deletedMessageIds = {};
 
   @override
   void initState() {
@@ -1527,31 +1534,50 @@ class _ChatScreenState extends State<ChatScreen> {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(
-          value: _MessageAction.reply,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.reply),
-            title: Text('Reply'),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _MessageAction.forward,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.forward),
-            title: Text('Forward'),
-          ),
-        ),
-        if (FormattedMessageText.parse(message.text).body.trim().isNotEmpty)
+        if (message.sendFailed) ...[
           const PopupMenuItem(
-            value: _MessageAction.createSticker,
+            value: _MessageAction.delete,
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.add_reaction_outlined),
-              title: Text('Создать стикер из сообщения'),
+              leading: Icon(Icons.delete_outline),
+              title: Text('Удалить'),
             ),
           ),
+          const PopupMenuItem(
+            value: _MessageAction.retry,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.refresh),
+              title: Text('Переотправить'),
+            ),
+          ),
+        ] else ...[
+          const PopupMenuItem(
+            value: _MessageAction.reply,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.reply),
+              title: Text('Reply'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: _MessageAction.forward,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.forward),
+              title: Text('Forward'),
+            ),
+          ),
+          if (FormattedMessageText.parse(message.text).body.trim().isNotEmpty)
+            const PopupMenuItem(
+              value: _MessageAction.createSticker,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.add_reaction_outlined),
+                title: Text('Создать стикер из сообщения'),
+              ),
+            ),
+        ],
       ],
     );
     if (!mounted) return;
@@ -1562,6 +1588,23 @@ class _ChatScreenState extends State<ChatScreen> {
         await _forwardMessage(message);
       case _MessageAction.createSticker:
         await _createStickerFromMessage(message);
+      case _MessageAction.delete:
+        if (widget.service.deleteFailedMessage(widget.peerId, message.msgId)) {
+          _removeMessage(message.msgId);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Не удалось удалить сообщение')),
+          );
+        }
+      case _MessageAction.retry:
+        final updated = widget.service.retryMessage(message.msgId);
+        if (updated != null) {
+          _appendMessage(updated);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Не удалось переотправить сообщение')),
+          );
+        }
       case null:
         break;
     }
@@ -1687,6 +1730,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onEvent(AppEvent e) {
+    if (e is MessageDeletedEvent && e.chatId == widget.peerId) {
+      _removeMessage(e.msgId);
+      return;
+    }
     if (e is MessageEvent) {
       final msg = e.message;
       if (msg.chatId.isEmpty) {
@@ -1704,16 +1751,34 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _appendMessage(ChatMessage message) {
-    if (message.msgId.isNotEmpty &&
-        _msgs.any((item) => item.msgId == message.msgId)) {
+    if (!mounted || _deletedMessageIds.contains(message.msgId)) return;
+    final existing = message.msgId.isEmpty
+        ? -1
+        : _msgs.indexWhere((item) => item.msgId == message.msgId);
+    if (existing >= 0) {
+      // A delayed failure event must not undo a successful retry.
+      if (_msgs[existing].sendFailed && !message.sendFailed) {
+        setState(() => _msgs[existing] = message);
+      }
       return;
     }
-    if (!mounted) return;
     setState(() {
       _msgs.add(message);
+      _loadedOlderCount++;
       _msgs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     });
     _scrollToBottom();
+  }
+
+  void _removeMessage(String msgId) {
+    if (!mounted) return;
+    setState(() {
+      _deletedMessageIds.add(msgId);
+      final previousCount = _msgs.length;
+      _msgs.removeWhere((message) => message.msgId == msgId);
+      _loadedOlderCount -= previousCount - _msgs.length;
+      if (_replyingTo?.msgId == msgId) _replyingTo = null;
+    });
   }
 
   Future<void> _appendLegacyEventIfCurrent(ChatMessage eventMessage) async {
@@ -1850,7 +1915,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         }
                         final idx = _msgs.length - 1 - i;
                         final m = _msgs[idx];
-                        final own = isMe(m.from);
+                        final own = m.sendFailed || isMe(m.from);
                         final startsDay =
                             idx == 0 ||
                             !DateUtils.isSameDay(
@@ -2106,6 +2171,21 @@ class _ChatScreenState extends State<ChatScreen> {
               if (own) const SizedBox(width: 8),
             ],
           ),
+          if (m.sendFailed)
+            Padding(
+              padding: const EdgeInsets.only(top: 3, right: 12, bottom: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, size: 14, color: colorScheme.error),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Не отправлено',
+                    style: TextStyle(fontSize: 12, color: colorScheme.error),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -2119,6 +2199,18 @@ class _ChatScreenState extends State<ChatScreen> {
   ) {
     Widget child = _messageBubble(message, own, theme, colorScheme);
     final platform = theme.platform;
+
+    if (message.sendFailed) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (details) => _showMessageMenu(message, details.globalPosition),
+        onSecondaryTapUp: (details) =>
+            _showMessageMenu(message, details.globalPosition),
+        onLongPressStart: (details) =>
+            _showMessageMenu(message, details.globalPosition),
+        child: IgnorePointer(child: child),
+      );
+    }
 
     if (platform == TargetPlatform.android || platform == TargetPlatform.iOS) {
       child = GestureDetector(

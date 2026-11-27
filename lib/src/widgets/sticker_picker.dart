@@ -7,6 +7,8 @@ String _saveError(Object error) => error is StickerLibraryException
     ? error.message
     : 'Не удалось сохранить изменения. Попробуйте ещё раз.';
 
+enum _StickerAction { move, delete }
+
 Future<String?> showStickerEditor({
   required BuildContext context,
   required StickerLibrary library,
@@ -84,7 +86,9 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   void _libraryChanged() {
-    final selected = _tabs == null ? null : _names[_tabs!.index];
+    final selected = _tabs == null || _names.isEmpty
+        ? null
+        : _names[_tabs!.index];
     final names = widget.library.categories
         .map((category) => category.name)
         .toList();
@@ -109,7 +113,7 @@ class _StickerPickerState extends State<StickerPicker>
     if (index >= 0) _tabs!.animateTo(index);
   }
 
-  Future<void> _createSticker(String categoryName) async {
+  Future<void> _createSticker([String? categoryName]) async {
     final selected = await showStickerEditor(
       context: context,
       library: widget.library,
@@ -125,6 +129,99 @@ class _StickerPickerState extends State<StickerPicker>
     );
     _select(selected);
   }
+
+  RelativeRect _menuPosition(Offset position) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    return RelativeRect.fromRect(
+      overlay.globalToLocal(position) & const Size(1, 1),
+      Offset.zero & overlay.size,
+    );
+  }
+
+  Future<void> _stickerMenu(
+    String category,
+    String text,
+    Offset position,
+  ) async {
+    final action = await showMenu<_StickerAction>(
+      context: context,
+      position: _menuPosition(position),
+      items: const [
+        PopupMenuItem(
+          value: _StickerAction.move,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.drive_file_move_outlined),
+            title: Text('Переместить в папку'),
+          ),
+        ),
+        PopupMenuItem(
+          value: _StickerAction.delete,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.delete_outline),
+            title: Text('Удалить стикер'),
+          ),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    switch (action) {
+      case _StickerAction.move:
+        final selected = await showDialog<String>(
+          context: context,
+          builder: (_) => _StickerEditor(
+            library: widget.library,
+            initialText: text,
+            moveFromCategory: category,
+          ),
+        );
+        _select(selected);
+      case _StickerAction.delete:
+        await _delete(
+          title: 'Удалить стикер?',
+          description: 'Стикер будет удалён из папки «$category».',
+          action: () =>
+              widget.library.deleteSticker(categoryName: category, text: text),
+        );
+      case null:
+        break;
+    }
+  }
+
+  Future<void> _categoryMenu(String name, Offset position) async {
+    final remove = await showMenu<bool>(
+      context: context,
+      position: _menuPosition(position),
+      items: const [
+        PopupMenuItem(
+          value: true,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.delete_outline),
+            title: Text('Удалить папку'),
+          ),
+        ),
+      ],
+    );
+    if (remove != true || !mounted) return;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _DeleteCategoryDialog(library: widget.library, name: name),
+    );
+    _select(selected);
+  }
+
+  Future<void> _delete({
+    required String title,
+    required String description,
+    required Future<void> Function() action,
+  }) => showDialog<void>(
+    context: context,
+    builder: (_) =>
+        _DeleteDialog(title: title, description: description, action: action),
+  );
 
   Widget _grid(StickerCategory category) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -147,25 +244,28 @@ class _StickerPickerState extends State<StickerPicker>
           );
         }
         final sticker = category.stickers[index];
-        return OutlinedButton(
-          onPressed: () {
-            if (widget.onSend(sticker)) Navigator.pop(context);
-          },
-          style: OutlinedButton.styleFrom(
-            foregroundColor: colorScheme.onSurface,
-            side: BorderSide(color: colorScheme.outlineVariant),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+        return _ContextActions(
+          onOpen: (position) => _stickerMenu(category.name, sticker, position),
+          child: OutlinedButton(
+            onPressed: () {
+              if (widget.onSend(sticker)) Navigator.pop(context);
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colorScheme.onSurface,
+              side: BorderSide(color: colorScheme.outlineVariant),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
             ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                sticker,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 18, fontFamily: 'monospace'),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  sticker,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 18, fontFamily: 'monospace'),
+                ),
               ),
             ),
           ),
@@ -210,28 +310,301 @@ class _StickerPickerState extends State<StickerPicker>
                       IconButton(
                         tooltip: 'Сортировать категории',
                         icon: const Icon(Icons.sort),
-                        onPressed: () => showDialog<void>(
-                          context: context,
-                          builder: (_) =>
-                              _CategorySorter(library: widget.library),
-                        ),
+                        onPressed: _names.length < 2
+                            ? null
+                            : () => showDialog<void>(
+                                context: context,
+                                builder: (_) =>
+                                    _CategorySorter(library: widget.library),
+                              ),
                       ),
                     ],
                   ),
                 ),
-                TabBar(
-                  controller: _tabs,
-                  isScrollable: true,
-                  tabs: _names.map((name) => Tab(text: name)).toList(),
-                ),
-                Expanded(
-                  child: TabBarView(
+                if (_names.isEmpty)
+                  Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Пока нет стикеров'),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _createSticker,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Создать стикер'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else ...[
+                  TabBar(
                     controller: _tabs,
-                    children: widget.library.categories.map(_grid).toList(),
+                    isScrollable: true,
+                    tabs: _names
+                        .map(
+                          (name) => _ContextActions(
+                            onOpen: (position) => _categoryMenu(name, position),
+                            child: Tab(text: name),
+                          ),
+                        )
+                        .toList(),
                   ),
-                ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabs,
+                      children: widget.library.categories.map(_grid).toList(),
+                    ),
+                  ),
+                ],
               ],
             ),
+    ),
+  );
+}
+
+class _ContextActions extends StatelessWidget {
+  const _ContextActions({required this.onOpen, required this.child});
+
+  final void Function(Offset) onOpen;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onLongPressStart: (details) => onOpen(details.globalPosition),
+    onSecondaryTapUp: (details) => onOpen(details.globalPosition),
+    child: child,
+  );
+}
+
+class _DeleteDialog extends StatefulWidget {
+  const _DeleteDialog({
+    required this.title,
+    required this.description,
+    required this.action,
+  });
+
+  final String title;
+  final String description;
+  final Future<void> Function() action;
+
+  @override
+  State<_DeleteDialog> createState() => _DeleteDialogState();
+}
+
+class _DeleteDialogState extends State<_DeleteDialog> {
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _delete() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.action();
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) setState(() => _error = _saveError(error));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_saving,
+    child: AlertDialog(
+      title: Text(widget.title),
+      scrollable: true,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.description),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _delete,
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+          child: Text(_saving ? 'Удаление…' : 'Удалить'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DeleteCategoryDialog extends StatefulWidget {
+  const _DeleteCategoryDialog({required this.library, required this.name});
+
+  final StickerLibrary library;
+  final String name;
+
+  @override
+  State<_DeleteCategoryDialog> createState() => _DeleteCategoryDialogState();
+}
+
+class _DeleteCategoryDialogState extends State<_DeleteCategoryDialog> {
+  final _form = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  late final _hasStickers = widget.library.categories
+      .firstWhere((category) => category.name == widget.name)
+      .stickers
+      .isNotEmpty;
+  late final _destinations = widget.library.categories
+      .map((category) => category.name)
+      .where((name) => name != widget.name)
+      .toList();
+  late String? _destination = _destinations.firstOrNull;
+  late bool _newCategory = _destinations.isEmpty;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _delete({required bool move}) async {
+    if (move && !_form.currentState!.validate()) return;
+    final destination = move
+        ? (_newCategory ? _name.text.trim() : _destination!)
+        : null;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.library.deleteCategory(
+        widget.name,
+        moveToCategory: destination,
+        createCategory: move && _newCategory,
+      );
+      if (mounted) Navigator.pop(context, destination);
+    } catch (error) {
+      if (mounted) setState(() => _error = _saveError(error));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_saving,
+    child: AlertDialog(
+      title: Text('Удалить папку «${widget.name}»?'),
+      scrollable: true,
+      content: SizedBox(
+        width: 480,
+        child: Form(
+          key: _form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_hasStickers) ...[
+                const Text('Куда переместить стикеры из этой папки?'),
+                const SizedBox(height: 16),
+                if (_newCategory)
+                  TextFormField(
+                    key: const ValueKey('delete-category-name'),
+                    controller: _name,
+                    enabled: !_saving,
+                    decoration: const InputDecoration(
+                      labelText: 'Название новой папки',
+                    ),
+                    validator: (value) =>
+                        widget.library.categoryNameError(value ?? ''),
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    initialValue: _destination,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Папка назначения',
+                    ),
+                    items: _destinations
+                        .map(
+                          (name) => DropdownMenuItem(
+                            value: name,
+                            child: Text(name, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() => _destination = value),
+                  ),
+                if (_destinations.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _saving
+                        ? null
+                        : () => setState(() => _newCategory = !_newCategory),
+                    icon: Icon(
+                      _newCategory ? Icons.folder_outlined : Icons.add,
+                    ),
+                    label: Text(
+                      _newCategory
+                          ? 'Выбрать существующую папку'
+                          : 'Создать новую папку',
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                const Text('Можно также удалить папку вместе со стикерами.'),
+              ] else
+                const Text('Папка пустая.'),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+        if (_hasStickers)
+          TextButton(
+            onPressed: _saving ? null : () => _delete(move: false),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Удалить вместе со стикерами'),
+          ),
+        FilledButton(
+          onPressed: _saving ? null : () => _delete(move: _hasStickers),
+          child: Text(
+            _saving
+                ? 'Сохранение…'
+                : _hasStickers
+                ? 'Перенести и удалить папку'
+                : 'Удалить папку',
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -241,10 +614,12 @@ class _StickerEditor extends StatefulWidget {
     required this.library,
     this.categoryName,
     required this.initialText,
+    this.moveFromCategory,
   });
   final StickerLibrary library;
   final String? categoryName;
   final String initialText;
+  final String? moveFromCategory;
 
   @override
   State<_StickerEditor> createState() => _StickerEditorState();
@@ -254,11 +629,16 @@ class _StickerEditorState extends State<_StickerEditor> {
   final _form = GlobalKey<FormState>();
   late final _text = TextEditingController(text: widget.initialText);
   final _name = TextEditingController();
-  late String _category =
-      widget.categoryName ?? widget.library.categories.first.name;
-  bool _newCategory = false;
+  late String? _category = widget.categoryName ?? _destinations.firstOrNull;
+  late bool _newCategory = _destinations.isEmpty;
   bool _saving = false;
   String? _error;
+
+  bool get _moving => widget.moveFromCategory != null;
+  List<String> get _destinations => widget.library.categories
+      .map((category) => category.name)
+      .where((name) => name != widget.moveFromCategory)
+      .toList();
 
   @override
   void dispose() {
@@ -273,13 +653,22 @@ class _StickerEditorState extends State<_StickerEditor> {
       _saving = true;
       _error = null;
     });
-    final category = _newCategory ? _name.text.trim() : _category;
+    final category = _newCategory ? _name.text.trim() : _category!;
     try {
-      await widget.library.addSticker(
-        text: _text.text,
-        categoryName: category,
-        createCategory: _newCategory,
-      );
+      if (_moving) {
+        await widget.library.moveSticker(
+          fromCategory: widget.moveFromCategory!,
+          toCategory: category,
+          text: widget.initialText,
+          createCategory: _newCategory,
+        );
+      } else {
+        await widget.library.addSticker(
+          text: _text.text,
+          categoryName: category,
+          createCategory: _newCategory,
+        );
+      }
       if (mounted) Navigator.pop(context, category);
     } catch (error) {
       if (mounted) setState(() => _error = _saveError(error));
@@ -292,7 +681,7 @@ class _StickerEditorState extends State<_StickerEditor> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
     child: AlertDialog(
-      title: const Text('Создать стикер'),
+      title: Text(_moving ? 'Переместить стикер' : 'Создать стикер'),
       scrollable: true,
       content: SizedBox(
         width: 480,
@@ -305,8 +694,8 @@ class _StickerEditorState extends State<_StickerEditor> {
               TextFormField(
                 key: const ValueKey('sticker-text'),
                 controller: _text,
-                enabled: !_saving,
-                autofocus: widget.initialText.isEmpty,
+                enabled: !_saving && !_moving,
+                autofocus: !_moving && widget.initialText.isEmpty,
                 minLines: 3,
                 maxLines: 8,
                 style: const TextStyle(fontFamily: 'monospace'),
@@ -324,15 +713,14 @@ class _StickerEditorState extends State<_StickerEditor> {
                 DropdownButtonFormField<String>(
                   initialValue: _category,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Категория'),
-                  items: widget.library.categories
+                  decoration: InputDecoration(
+                    labelText: _moving ? 'Папка назначения' : 'Категория',
+                  ),
+                  items: _destinations
                       .map(
-                        (category) => DropdownMenuItem(
-                          value: category.name,
-                          child: Text(
-                            category.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        (name) => DropdownMenuItem(
+                          value: name,
+                          child: Text(name, overflow: TextOverflow.ellipsis),
                         ),
                       )
                       .toList(),
@@ -352,17 +740,18 @@ class _StickerEditorState extends State<_StickerEditor> {
                   validator: (value) =>
                       widget.library.categoryNameError(value ?? ''),
                 ),
-              TextButton.icon(
-                onPressed: _saving
-                    ? null
-                    : () => setState(() => _newCategory = !_newCategory),
-                icon: Icon(_newCategory ? Icons.folder_outlined : Icons.add),
-                label: Text(
-                  _newCategory
-                      ? 'Выбрать существующую категорию'
-                      : 'Создать новую категорию',
+              if (_destinations.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _saving
+                      ? null
+                      : () => setState(() => _newCategory = !_newCategory),
+                  icon: Icon(_newCategory ? Icons.folder_outlined : Icons.add),
+                  label: Text(
+                    _newCategory
+                        ? 'Выбрать существующую категорию'
+                        : 'Создать новую категорию',
+                  ),
                 ),
-              ),
               if (_error != null)
                 Text(
                   _error!,
@@ -379,7 +768,13 @@ class _StickerEditorState extends State<_StickerEditor> {
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+          child: Text(
+            _saving
+                ? 'Сохранение…'
+                : _moving
+                ? 'Переместить'
+                : 'Сохранить',
+          ),
         ),
       ],
     ),

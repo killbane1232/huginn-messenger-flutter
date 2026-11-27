@@ -6,6 +6,8 @@ import 'package:huginn_messenger/main.dart';
 import 'package:huginn_messenger/src/services/sticker_library.dart';
 import 'package:huginn_messenger/src/widgets/sticker_picker.dart';
 
+import 'support/memory_sticker_store.dart';
+
 class _Messenger extends MessengerService {
   _Messenger(StickerLibrary stickers) : super(stickers: stickers);
 
@@ -30,23 +32,11 @@ class _Messenger extends MessengerService {
 void main() {
   late StickerLibrary library;
   late _Messenger service;
-  String? saved;
-  bool failWrite = false;
+  late MemoryStickerStore store;
 
   setUp(() {
-    saved = null;
-    failWrite = false;
-    library = StickerLibrary(
-      defaults: const {
-        'Радость': ['(^_^)'],
-        'Грусть': ['(T_T)'],
-      },
-      read: () async => saved,
-      write: (data) async {
-        if (failWrite) throw StateError('disk full');
-        saved = data;
-      },
-    );
+    store = MemoryStickerStore();
+    library = StickerLibrary(store: store);
     service = _Messenger(library);
   });
   tearDown(() => service.dispose());
@@ -77,6 +67,251 @@ void main() {
 
   final stickerText = find.byKey(const ValueKey('sticker-text'));
   final categoryName = find.byKey(const ValueKey('category-name'));
+
+  Future<void> contextMenu(
+    WidgetTester tester,
+    Finder target,
+    TargetPlatform platform,
+  ) async {
+    if (platform == TargetPlatform.macOS) {
+      await tester.tap(target, buttons: kSecondaryMouseButton);
+    } else {
+      await tester.longPress(target);
+    }
+    await tester.pumpAndSettle();
+  }
+
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.android,
+    TargetPlatform.iOS,
+  ]) {
+    testWidgets('context menu moves and deletes without sending on $platform', (
+      tester,
+    ) async {
+      await showChat(tester, platform: platform);
+      await openPicker(tester);
+      await contextMenu(tester, find.text('(^_^)'), platform);
+      expect(service.sent, isEmpty);
+      await tester.tap(find.text('Переместить в папку'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Переместить'));
+      await tester.pumpAndSettle();
+      expect(library.categories.first.stickers, isEmpty);
+      expect(library.categories.last.stickers, ['(T_T)', '(^_^)']);
+      expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 1);
+
+      await contextMenu(tester, find.text('(^_^)'), platform);
+      await tester.tap(find.text('Удалить стикер'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(library.categories.last.stickers, contains('(^_^)'));
+      await contextMenu(tester, find.text('(^_^)'), platform);
+      await tester.tap(find.text('Удалить стикер'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Удалить'));
+      await tester.pumpAndSettle();
+      expect(library.categories.last.stickers, ['(T_T)']);
+
+      await contextMenu(tester, find.text('Грусть'), platform);
+      await tester.tap(find.text('Удалить папку'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Куда переместить стикеры из этой папки?'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Удалить вместе со стикерами'));
+      await tester.pumpAndSettle();
+      expect(library.categories.single.name, 'Радость');
+      expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 0);
+      expect(service.sent, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'folder deletion offers transfer to the selected folder on $platform',
+      (tester) async {
+        await library.addSticker(
+          text: '(^_^)',
+          categoryName: 'Другая',
+          createCategory: true,
+        );
+        await showChat(tester, platform: platform);
+        await openPicker(tester);
+        await contextMenu(tester, find.text('Радость'), platform);
+        await tester.tap(find.text('Удалить папку'));
+        await tester.pumpAndSettle();
+        final dropdown = tester.widget<DropdownButton<String>>(
+          find.byType(DropdownButton<String>),
+        );
+        expect(dropdown.items!.map((item) => item.value), ['Грусть', 'Другая']);
+        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Другая').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Перенести и удалить папку'));
+        await tester.pumpAndSettle();
+        expect(library.categories.map((c) => c.name), ['Грусть', 'Другая']);
+        expect(library.categories.last.stickers, ['(^_^)', '(^_^)']);
+        expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 1);
+        expect(service.sent, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('folder deletion can be cancelled without changing stickers', (
+    tester,
+  ) async {
+    await showChat(tester);
+    await openPicker(tester);
+    await contextMenu(tester, find.text('Радость'), TargetPlatform.macOS);
+    await tester.tap(find.text('Удалить папку'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(library.categories.map((c) => c.name), ['Радость', 'Грусть']);
+    expect(library.categories.first.stickers, ['(^_^)']);
+    expect(store.saved, isNull);
+  });
+
+  testWidgets(
+    'last folder transfers into a new folder on a narrow screen and retries failures',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      await library.deleteCategory('Грусть');
+      await showChat(tester, platform: TargetPlatform.android);
+      await openPicker(tester);
+      await contextMenu(tester, find.text('Радость'), TargetPlatform.android);
+      await tester.tap(find.text('Удалить папку'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Перенести и удалить папку'));
+      await tester.pumpAndSettle();
+      expect(find.text('Введите название категории'), findsOneWidget);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 240);
+      await tester.pumpAndSettle();
+      final newName = find.byKey(const ValueKey('delete-category-name'));
+      await tester.enterText(newName, 'Сохранённые');
+      store.failWrite = true;
+      await tester.ensureVisible(find.text('Перенести и удалить папку'));
+      await tester.tap(find.text('Перенести и удалить папку'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Не удалось сохранить изменения. Попробуйте ещё раз.'),
+        findsOneWidget,
+      );
+      expect(library.categories.single.name, 'Радость');
+      expect(library.categories.single.stickers, ['(^_^)']);
+      expect(
+        tester.widget<TextFormField>(newName).controller!.text,
+        'Сохранённые',
+      );
+      store.failWrite = false;
+      await tester.tap(find.text('Перенести и удалить папку'));
+      await tester.pumpAndSettle();
+      expect(library.categories.single.name, 'Сохранённые');
+      expect(library.categories.single.stickers, ['(^_^)']);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('empty folder can be removed without selecting a destination', (
+    tester,
+  ) async {
+    await library.deleteSticker(categoryName: 'Радость', text: '(^_^)');
+    await showChat(tester);
+    await openPicker(tester);
+    await contextMenu(tester, find.text('Радость'), TargetPlatform.macOS);
+    await tester.tap(find.text('Удалить папку'));
+    await tester.pumpAndSettle();
+    expect(find.text('Папка пустая.'), findsOneWidget);
+    expect(find.text('Перенести и удалить папку'), findsNothing);
+    await tester.tap(find.text('Удалить папку'));
+    await tester.pumpAndSettle();
+    expect(library.categories.single.name, 'Грусть');
+    expect(library.categories.single.stickers, ['(T_T)']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('last folder can be deleted and a new collection created', (
+    tester,
+  ) async {
+    await library.deleteCategory('Грусть');
+    await showChat(tester);
+    await openPicker(tester);
+    await contextMenu(tester, find.text('Радость'), TargetPlatform.macOS);
+    await tester.tap(find.text('Удалить папку'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Удалить вместе со стикерами'));
+    await tester.pumpAndSettle();
+    expect(find.text('Пока нет стикеров'), findsOneWidget);
+    expect(library.categories, isEmpty);
+    await tester.tap(find.text('Создать стикер'));
+    await tester.pumpAndSettle();
+    await tester.enterText(stickerText, '☆');
+    await tester.enterText(categoryName, 'Новая');
+    await save(tester);
+    expect(library.categories.single.stickers, ['☆']);
+    expect(find.text('Новая'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('move into a new folder preserves draft on failure', (
+    tester,
+  ) async {
+    await library.deleteCategory('Грусть');
+    await showChat(tester);
+    await openPicker(tester);
+    await contextMenu(tester, find.text('(^_^)'), TargetPlatform.macOS);
+    await tester.tap(find.text('Переместить в папку'));
+    await tester.pumpAndSettle();
+    await tester.enterText(categoryName, 'Новая');
+    store.failWrite = true;
+    await tester.tap(find.text('Переместить'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Не удалось сохранить изменения. Попробуйте ещё раз.'),
+      findsOneWidget,
+    );
+    expect(library.categories.single.stickers, ['(^_^)']);
+    store.failWrite = false;
+    await tester.tap(find.text('Переместить'));
+    await tester.pumpAndSettle();
+    expect(library.categories.first.stickers, isEmpty);
+    expect(library.categories.last.name, 'Новая');
+    expect(library.categories.last.stickers, ['(^_^)']);
+    expect(service.sent, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed folder deletion keeps dialog open for retry', (
+    tester,
+  ) async {
+    await showChat(tester);
+    await openPicker(tester);
+    await contextMenu(tester, find.text('Радость'), TargetPlatform.macOS);
+    await tester.tap(find.text('Удалить папку'));
+    await tester.pumpAndSettle();
+    store.failWrite = true;
+    await tester.tap(find.text('Удалить вместе со стикерами'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Не удалось сохранить изменения. Попробуйте ещё раз.'),
+      findsOneWidget,
+    );
+    expect(library.categories.first.stickers, ['(^_^)']);
+    store.failWrite = false;
+    await tester.tap(find.text('Удалить вместе со стикерами'));
+    await tester.pumpAndSettle();
+    expect(library.categories.single.name, 'Грусть');
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'creates at the end of either category and sends exact character art',
@@ -244,7 +479,7 @@ void main() {
       findsOneWidget,
     );
     await tester.enterText(categoryName, 'Новая');
-    failWrite = true;
+    store.failWrite = true;
     await save(tester);
     expect(
       find.text('Не удалось сохранить изменения. Попробуйте ещё раз.'),
@@ -252,7 +487,7 @@ void main() {
     );
     expect(tester.widget<TextFormField>(stickerText).controller!.text, '☆');
     expect(library.categories, hasLength(2));
-    failWrite = false;
+    store.failWrite = false;
     await save(tester);
     expect(library.categories.last.stickers, ['☆']);
     expect(find.byType(AlertDialog), findsNothing);
@@ -272,7 +507,7 @@ void main() {
     await tester.tap(find.text('Отмена'));
     await tester.pumpAndSettle();
     expect(library.categories, hasLength(2));
-    expect(saved, isNull);
+    expect(store.saved, isNull);
     expect(service.sent, isEmpty);
   });
 
